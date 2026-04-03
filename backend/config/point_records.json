@@ -1,0 +1,25 @@
+{
+  "records": [
+    {
+      "record_id": "pr_1775208065601_1",
+      "user_id": "u_13800000000",
+      "points": 80,
+      "reason": "activity",
+      "created_at": "2026-04-03T17:21:05.601472"
+    },
+    {
+      "record_id": "pr_1775208223674_2",
+      "user_id": "u_13800000000",
+      "points": 120,
+      "reason": "bonus",
+      "created_at": "2026-04-03T17:23:43.674459"
+    },
+    {
+      "record_id": "pr_1775208223682_3",
+      "user_id": "u_13800000000",
+      "points": -50,
+      "reason": "redemption",
+      "created_at": "2026-04-03T17:23:43.682462"
+    }
+  ]
+}
