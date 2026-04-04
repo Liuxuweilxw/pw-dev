@@ -73,6 +73,9 @@ class HttpPlatformApi implements PlatformApi {
   }
 
   @override
+  String get authToken => _accessToken;
+
+  @override
   Future<void> updateUserRole(UserRole role) async {
     await _request(
       method: 'POST',
@@ -198,6 +201,16 @@ class HttpPlatformApi implements PlatformApi {
   }
 
   @override
+  Future<RoomItem> rejectCompanionOrder({required String roomId}) async {
+    final payload = await _request(
+      method: 'POST',
+      path: '/rooms/$roomId/reject-order',
+      body: const {},
+    );
+    return RoomItem.fromJson(payload as Map<String, dynamic>);
+  }
+
+  @override
   Future<List<RoomMemberItem>> fetchRoomMembers({
     required String roomId,
   }) async {
@@ -213,6 +226,31 @@ class HttpPlatformApi implements PlatformApi {
   }
 
   @override
+  Future<List<InvitationItem>> fetchRoomInvitations({
+    required String roomId,
+  }) async {
+    final payload = await _request(
+      method: 'GET',
+      path: '/rooms/$roomId/invitations',
+    );
+    final list = _asList(payload);
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(InvitationItem.fromJson)
+        .toList();
+  }
+
+  @override
+  Future<List<InvitationItem>> fetchPendingInvitations() async {
+    final payload = await _request(method: 'GET', path: '/invitations/pending');
+    final list = _asList(payload);
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(InvitationItem.fromJson)
+        .toList();
+  }
+
+  @override
   Future<void> inviteCompanion({
     required String roomId,
     required String companionId,
@@ -220,6 +258,18 @@ class HttpPlatformApi implements PlatformApi {
     await _request(
       method: 'POST',
       path: '/rooms/$roomId/invite',
+      body: {'companion_id': companionId},
+    );
+  }
+
+  @override
+  Future<void> cancelCompanionInvitation({
+    required String roomId,
+    required String companionId,
+  }) async {
+    await _request(
+      method: 'POST',
+      path: '/rooms/$roomId/cancel-invite',
       body: {'companion_id': companionId},
     );
   }

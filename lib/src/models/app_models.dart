@@ -6,12 +6,14 @@ class AuthSession {
     required this.refreshToken,
     required this.userId,
     required this.role,
+    this.verificationStatus = 'notStarted',
   });
 
   final String accessToken;
   final String refreshToken;
   final String userId;
   final UserRole role;
+  final String verificationStatus;
 
   factory AuthSession.fromJson(Map<String, dynamic> json) {
     return AuthSession(
@@ -19,6 +21,8 @@ class AuthSession {
       refreshToken: _requiredString(json, 'refresh_token'),
       userId: _requiredString(json, 'user_id'),
       role: _parseUserRole(json['user_role']),
+      verificationStatus: (json['verification_status'] ?? 'notStarted')
+          .toString(),
     );
   }
 }
@@ -174,6 +178,61 @@ class RoomMemberItem {
       userName: _requiredString(json, 'user_name'),
       role: _requiredString(json, 'role'),
       status: _requiredString(json, 'status'),
+    );
+  }
+}
+
+class InvitationItem {
+  const InvitationItem({
+    required this.inviteId,
+    required this.roomId,
+    required this.roomTitle,
+    required this.inviterUserId,
+    required this.inviterUserName,
+    required this.inviteeUserId,
+    required this.inviteeUserName,
+    required this.status,
+    required this.createdAt,
+    this.expiresAt,
+    this.decidedAt,
+    this.rejectReason,
+  });
+
+  final String inviteId;
+  final String roomId;
+  final String roomTitle;
+  final String inviterUserId;
+  final String inviterUserName;
+  final String inviteeUserId;
+  final String inviteeUserName;
+  final String status;
+  final DateTime createdAt;
+  final DateTime? expiresAt;
+  final DateTime? decidedAt;
+  final String? rejectReason;
+
+  bool get isPending => status == 'pending';
+  bool get isAccepted => status == 'accepted';
+  bool get isRejected => status == 'rejected';
+  bool get isExpired => status == 'expired';
+  bool get isCancelled => status == 'cancelled';
+  bool get isFailed => status == 'failed';
+
+  factory InvitationItem.fromJson(Map<String, dynamic> json) {
+    return InvitationItem(
+      inviteId: _requiredString(json, 'invite_id'),
+      roomId: _requiredString(json, 'room_id'),
+      roomTitle: (json['room_title'] ?? '').toString(),
+      inviterUserId: _requiredString(json, 'inviter_user_id'),
+      inviterUserName: (json['inviter_user_name'] ?? '').toString(),
+      inviteeUserId: _requiredString(json, 'invitee_user_id'),
+      inviteeUserName: (json['invitee_user_name'] ?? '').toString(),
+      status: _requiredString(json, 'status'),
+      createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      expiresAt: DateTime.tryParse((json['expires_at'] ?? '').toString()),
+      decidedAt: DateTime.tryParse((json['decided_at'] ?? '').toString()),
+      rejectReason: json['reject_reason']?.toString(),
     );
   }
 }

@@ -17,6 +17,8 @@ abstract class PlatformApi {
 
   Future<void> setAuthToken(String token);
 
+  String get authToken;
+
   Future<void> updateUserRole(UserRole role);
 
   Future<UserProfile> fetchUserProfile();
@@ -53,7 +55,14 @@ abstract class PlatformApi {
 
   Future<RoomItem> confirmCompanionOrder({required String roomId});
 
+  Future<RoomItem> rejectCompanionOrder({required String roomId});
+
   Future<void> inviteCompanion({
+    required String roomId,
+    required String companionId,
+  });
+
+  Future<void> cancelCompanionInvitation({
     required String roomId,
     required String companionId,
   });
@@ -61,6 +70,10 @@ abstract class PlatformApi {
   Future<void> dissolveRoom({required String roomId});
 
   Future<List<RoomMemberItem>> fetchRoomMembers({required String roomId});
+
+  Future<List<InvitationItem>> fetchRoomInvitations({required String roomId});
+
+  Future<List<InvitationItem>> fetchPendingInvitations();
 
   Future<void> confirmRoomCompleted({required String roomId});
 
@@ -147,6 +160,7 @@ class MockPlatformApi implements PlatformApi {
         ),
       ],
   };
+  final Map<String, List<InvitationItem>> _roomInvitations = {};
   final List<CompanionItem> _companions = const [
     CompanionItem(
       id: 'cp_001',
@@ -209,6 +223,7 @@ class MockPlatformApi implements PlatformApi {
       refreshToken: 'mock-refresh-token',
       userId: _mockUserId,
       role: _mockRole,
+      verificationStatus: _verification.status.name,
     );
   }
 
@@ -240,6 +255,9 @@ class MockPlatformApi implements PlatformApi {
   Future<void> setAuthToken(String token) async {
     _token = token;
   }
+
+  @override
+  String get authToken => _token;
 
   @override
   Future<void> updateUserRole(UserRole role) async {
@@ -332,6 +350,7 @@ class MockPlatformApi implements PlatformApi {
         status: '房主',
       ),
     ];
+    _roomInvitations[room.id] = [];
     return room;
   }
 
@@ -339,7 +358,13 @@ class MockPlatformApi implements PlatformApi {
   Future<List<RoomItem>> fetchJoinedRooms() async {
     final joinedRoomIds = _roomMembers.entries
         .where(
-          (entry) => entry.value.any((member) => member.userId == _mockUserId),
+          (entry) => entry.value.any(
+            (member) =>
+                member.userId == _mockUserId &&
+                (member.status == '房主' ||
+                    member.status == '已加入' ||
+                    member.status == '已接单'),
+          ),
         )
         .map((entry) => entry.key)
         .toSet();
@@ -355,7 +380,71 @@ class MockPlatformApi implements PlatformApi {
   Future<List<RoomMemberItem>> fetchRoomMembers({
     required String roomId,
   }) async {
-    return _roomMembers[roomId] ?? const [];
+    return List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
+  }
+
+  @override
+  Future<List<InvitationItem>> fetchRoomInvitations({
+    required String roomId,
+  }) async {
+    final now = DateTime.now();
+    final current = List<InvitationItem>.from(
+      _roomInvitations[roomId] ?? const [],
+    );
+    var changed = false;
+    final next = <InvitationItem>[];
+    final members = List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
+
+    for (final item in current) {
+      if (item.isPending && item.expiresAt != null && now.isAfter(item.expiresAt!)) {
+        changed = true;
+        members.removeWhere(
+          (member) =>
+              member.userId == item.inviteeUserId && member.status == '待确认接单',
+        );
+        next.add(
+          InvitationItem(
+            inviteId: item.inviteId,
+            roomId: item.roomId,
+            roomTitle: item.roomTitle,
+            inviterUserId: item.inviterUserId,
+            inviterUserName: item.inviterUserName,
+            inviteeUserId: item.inviteeUserId,
+            inviteeUserName: item.inviteeUserName,
+            status: 'expired',
+            createdAt: item.createdAt,
+            expiresAt: item.expiresAt,
+            decidedAt: now,
+            rejectReason: item.rejectReason,
+          ),
+        );
+      } else {
+        next.add(item);
+      }
+    }
+
+    if (changed) {
+      _roomMembers[roomId] = members;
+      _roomInvitations[roomId] = next;
+    }
+
+    next.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return next;
+  }
+
+  @override
+  Future<List<InvitationItem>> fetchPendingInvitations() async {
+    final result = <InvitationItem>[];
+    for (final roomId in _roomInvitations.keys) {
+      final list = await fetchRoomInvitations(roomId: roomId);
+      result.addAll(
+        list.where(
+          (item) => item.isPending && item.inviteeUserId == _mockUserId,
+        ),
+      );
+    }
+    result.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return result;
   }
 
   @override
@@ -364,6 +453,12 @@ class MockPlatformApi implements PlatformApi {
     String keyword = '',
     String filter = '全部',
   }) async {
+    if (role == UserRole.companion) {
+      for (final roomId in _roomInvitations.keys) {
+        await fetchRoomInvitations(roomId: roomId);
+      }
+    }
+
     return _rooms.where((room) {
       final hitKeyword =
           keyword.isEmpty ||
@@ -372,7 +467,35 @@ class MockPlatformApi implements PlatformApi {
           room.tags.join(' ').contains(keyword);
       final hitFilter =
           filter == '全部' || room.status == filter || room.tags.contains(filter);
-      return hitKeyword && hitFilter;
+
+      var hitRole = true;
+      if (role == UserRole.companion) {
+        final members = _roomMembers[room.id] ?? const <RoomMemberItem>[];
+        hitRole = members.any(
+          (member) =>
+              member.userId == _mockUserId &&
+              (member.status == '房主' ||
+                  member.status == '待确认接单' ||
+                  member.status == '已加入' ||
+                  member.status == '已接单'),
+        );
+      } else if (role == UserRole.boss) {
+        final members = _roomMembers[room.id] ?? const <RoomMemberItem>[];
+        final owner = members.firstWhere(
+          (member) => member.status == '房主',
+          orElse: () => const RoomMemberItem(
+            userId: '',
+            userName: '',
+            role: '',
+            status: '',
+          ),
+        );
+        if (owner.userId.isNotEmpty && owner.role == UserRole.boss.name) {
+          hitRole = owner.userId == _mockUserId;
+        }
+      }
+
+      return hitKeyword && hitFilter && hitRole;
     }).toList();
   }
 
@@ -450,10 +573,6 @@ class MockPlatformApi implements PlatformApi {
     }
 
     final room = _rooms[roomIndex];
-    if (room.seatsLeft <= 0) {
-      throw Exception('房间已满，无法确认接单');
-    }
-
     final members = List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
     final pendingIndex = members.indexWhere(
       (member) =>
@@ -465,6 +584,36 @@ class MockPlatformApi implements PlatformApi {
       throw Exception('当前房间没有待确认接单记录');
     }
 
+    if (room.seatsLeft <= 0) {
+      final invitations = List<InvitationItem>.from(
+        _roomInvitations[roomId] ?? const [],
+      );
+      final inviteIndex = invitations.indexWhere(
+        (item) => item.inviteeUserId == _mockUserId && item.isPending,
+      );
+      if (inviteIndex >= 0) {
+        final current = invitations[inviteIndex];
+        invitations[inviteIndex] = InvitationItem(
+          inviteId: current.inviteId,
+          roomId: current.roomId,
+          roomTitle: current.roomTitle,
+          inviterUserId: current.inviterUserId,
+          inviterUserName: current.inviterUserName,
+          inviteeUserId: current.inviteeUserId,
+          inviteeUserName: current.inviteeUserName,
+          status: 'failed',
+          createdAt: current.createdAt,
+          expiresAt: current.expiresAt,
+          decidedAt: DateTime.now(),
+          rejectReason: '房间已满',
+        );
+        _roomInvitations[roomId] = invitations;
+      }
+      members.removeAt(pendingIndex);
+      _roomMembers[roomId] = members;
+      throw Exception('房间已满，无法确认接单');
+    }
+
     members[pendingIndex] = RoomMemberItem(
       userId: members[pendingIndex].userId,
       userName: members[pendingIndex].userName,
@@ -472,6 +621,31 @@ class MockPlatformApi implements PlatformApi {
       status: '已接单',
     );
     _roomMembers[roomId] = members;
+
+    final invitations = List<InvitationItem>.from(
+      _roomInvitations[roomId] ?? const [],
+    );
+    final inviteIndex = invitations.indexWhere(
+      (item) => item.inviteeUserId == _mockUserId && item.isPending,
+    );
+    if (inviteIndex >= 0) {
+      final current = invitations[inviteIndex];
+      invitations[inviteIndex] = InvitationItem(
+        inviteId: current.inviteId,
+        roomId: current.roomId,
+        roomTitle: current.roomTitle,
+        inviterUserId: current.inviterUserId,
+        inviterUserName: current.inviterUserName,
+        inviteeUserId: current.inviteeUserId,
+        inviteeUserName: current.inviteeUserName,
+        status: 'accepted',
+        createdAt: current.createdAt,
+        expiresAt: current.expiresAt,
+        decidedAt: DateTime.now(),
+        rejectReason: current.rejectReason,
+      );
+      _roomInvitations[roomId] = invitations;
+    }
 
     final updatedRoom = RoomItem(
       id: room.id,
@@ -501,6 +675,56 @@ class MockPlatformApi implements PlatformApi {
     );
 
     return updatedRoom;
+  }
+
+  @override
+  Future<RoomItem> rejectCompanionOrder({required String roomId}) async {
+    final roomIndex = _rooms.indexWhere((room) => room.id == roomId);
+    if (roomIndex < 0) {
+      throw Exception('房间不存在');
+    }
+
+    final room = _rooms[roomIndex];
+    final members = List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
+    final pendingIndex = members.indexWhere(
+      (member) =>
+          member.userId == _mockUserId &&
+          member.role == UserRole.companion.name &&
+          member.status == '待确认接单',
+    );
+    if (pendingIndex < 0) {
+      throw Exception('当前房间没有待确认接单记录');
+    }
+
+    members.removeAt(pendingIndex);
+    _roomMembers[roomId] = members;
+
+    final invitations = List<InvitationItem>.from(
+      _roomInvitations[roomId] ?? const [],
+    );
+    final inviteIndex = invitations.indexWhere(
+      (item) => item.inviteeUserId == _mockUserId && item.isPending,
+    );
+    if (inviteIndex >= 0) {
+      final current = invitations[inviteIndex];
+      invitations[inviteIndex] = InvitationItem(
+        inviteId: current.inviteId,
+        roomId: current.roomId,
+        roomTitle: current.roomTitle,
+        inviterUserId: current.inviterUserId,
+        inviterUserName: current.inviterUserName,
+        inviteeUserId: current.inviteeUserId,
+        inviteeUserName: current.inviteeUserName,
+        status: 'rejected',
+        createdAt: current.createdAt,
+        expiresAt: current.expiresAt,
+        decidedAt: DateTime.now(),
+        rejectReason: current.rejectReason,
+      );
+      _roomInvitations[roomId] = invitations;
+    }
+
+    return room;
   }
 
   @override
@@ -540,6 +764,78 @@ class MockPlatformApi implements PlatformApi {
         status: '待确认接单',
       ),
     ];
+
+    final invitations = List<InvitationItem>.from(
+      _roomInvitations[roomId] ?? const [],
+    );
+    if (invitations.any(
+      (item) => item.inviteeUserId == companion.id && item.isPending,
+    )) {
+      throw Exception('该陪玩已有待处理邀请');
+    }
+
+    final now = DateTime.now();
+    invitations.insert(
+      0,
+      InvitationItem(
+        inviteId: 'INV-${now.microsecondsSinceEpoch}',
+        roomId: roomId,
+        roomTitle: room.title,
+        inviterUserId: _mockUserId,
+        inviterUserName: _mockDisplayName,
+        inviteeUserId: companion.id,
+        inviteeUserName: companion.name,
+        status: 'pending',
+        createdAt: now,
+        expiresAt: now.add(const Duration(minutes: 5)),
+      ),
+    );
+    _roomInvitations[roomId] = invitations;
+  }
+
+  @override
+  Future<void> cancelCompanionInvitation({
+    required String roomId,
+    required String companionId,
+  }) async {
+    final roomIndex = _rooms.indexWhere((room) => room.id == roomId);
+    if (roomIndex < 0) {
+      throw Exception('房间不存在');
+    }
+
+    final invitations = List<InvitationItem>.from(
+      _roomInvitations[roomId] ?? const [],
+    );
+    final inviteIndex = invitations.indexWhere(
+      (item) => item.inviteeUserId == companionId && item.isPending,
+    );
+    if (inviteIndex < 0) {
+      throw Exception('未找到可取消的待处理邀请');
+    }
+
+    final current = invitations[inviteIndex];
+    invitations[inviteIndex] = InvitationItem(
+      inviteId: current.inviteId,
+      roomId: current.roomId,
+      roomTitle: current.roomTitle,
+      inviterUserId: current.inviterUserId,
+      inviterUserName: current.inviterUserName,
+      inviteeUserId: current.inviteeUserId,
+      inviteeUserName: current.inviteeUserName,
+      status: 'cancelled',
+      createdAt: current.createdAt,
+      expiresAt: current.expiresAt,
+      decidedAt: DateTime.now(),
+      rejectReason: 'inviter_cancelled',
+    );
+    _roomInvitations[roomId] = invitations;
+
+    final members = List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
+    members.removeWhere(
+      (member) =>
+          member.userId == companionId && member.status == '待确认接单',
+    );
+    _roomMembers[roomId] = members;
   }
 
   @override
@@ -558,6 +854,7 @@ class MockPlatformApi implements PlatformApi {
 
     _rooms.removeAt(roomIndex);
     _roomMembers.remove(roomId);
+    _roomInvitations.remove(roomId);
 
     for (var i = 0; i < _orders.length; i++) {
       final order = _orders[i];

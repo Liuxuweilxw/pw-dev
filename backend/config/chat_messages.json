@@ -1,3 +1,654 @@
 {
-    "rooms": {}
+  "rooms": {
+    "R-13001": [
+      {
+        "message_id": "sys_1775316258419",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:24:18.419149",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316272881",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:24:32.881977",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316276308",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:24:36.308499",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316278902",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:24:38.902077",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316287990",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:24:47.990187",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316290441",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:24:50.441233",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316292168",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:24:52.168996",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316297741",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:24:57.741261",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316299203",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:24:59.203679",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316306869",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:25:06.869347",
+        "message_type": "system"
+      },
+      {
+        "message_id": "msg_1775316311486",
+        "sender_id": "mock-user",
+        "sender_name": "老板",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:25:11.492465",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316319751",
+        "sender_id": "mock-user",
+        "sender_name": "陪玩",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:25:19.762302",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316325757",
+        "sender_id": "mock-user",
+        "sender_name": "陪玩",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:25:25.758107",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316329204",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:25:29.204996",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316336864",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:25:36.864401",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316359205",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:25:59.205139",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316366902",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:26:06.902394",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316389205",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:26:29.205536",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316396903",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:26:36.903591",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316419207",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:26:59.207314",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316426904",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:27:06.904703",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316449208",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:27:29.208149",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316456867",
+        "sender_id": "mock-user",
+        "sender_name": "测试用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:27:36.867741",
+        "message_type": "text"
+      },
+      {
+        "message_id": "sys_1775316457413",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:27:37.413428",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316463279",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:27:43.279181",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316464145",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:27:44.145216",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316467727",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "测试用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:27:47.727461",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316911696",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "当前用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:35:11.696601",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316917432",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "当前用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:35:17.432640",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316932909",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "当前用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:35:32.909996",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775316934827",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "当前用户 加入了聊天室",
+        "timestamp": "2026-04-04T23:35:34.827429",
+        "message_type": "system"
+      },
+      {
+        "message_id": "msg_1775316939597",
+        "sender_id": "u_13900000000",
+        "sender_name": "当前用户",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:35:39.602338",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316947697",
+        "sender_id": "u_13800000000",
+        "sender_name": "当前用户",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:35:47.708062",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316960817",
+        "sender_id": "u_13800000000",
+        "sender_name": "当前用户",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:36:00.818085",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316962910",
+        "sender_id": "u_13900000000",
+        "sender_name": "当前用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:36:02.910749",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316964822",
+        "sender_id": "u_13800000000",
+        "sender_name": "当前用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:36:04.822834",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316992911",
+        "sender_id": "u_13900000000",
+        "sender_name": "当前用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:36:32.911753",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775316994824",
+        "sender_id": "u_13800000000",
+        "sender_name": "当前用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:36:34.824687",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775317022912",
+        "sender_id": "u_13900000000",
+        "sender_name": "当前用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:37:02.912398",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775317024825",
+        "sender_id": "u_13800000000",
+        "sender_name": "当前用户",
+        "content": "",
+        "timestamp": "2026-04-04T23:37:04.825445",
+        "message_type": "text"
+      },
+      {
+        "message_id": "sys_1775317047692",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "当前用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:37:27.692444",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317051665",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "当前用户 离开了聊天室",
+        "timestamp": "2026-04-04T23:37:31.665829",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317159107",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:39:19.107713",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317159900",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:39:19.900183",
+        "message_type": "system"
+      },
+      {
+        "message_id": "msg_1775317164620",
+        "sender_id": "u_13900000000",
+        "sender_name": "老板C",
+        "content": "你还",
+        "timestamp": "2026-04-04T23:39:24.621955",
+        "message_type": "text"
+      },
+      {
+        "message_id": "msg_1775317172673",
+        "sender_id": "u_13800000000",
+        "sender_name": "陪玩A",
+        "content": "你好",
+        "timestamp": "2026-04-04T23:39:32.674432",
+        "message_type": "text"
+      },
+      {
+        "message_id": "sys_1775317177135",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:39:37.135553",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317178979",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:39:38.979722",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317347508",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:42:27.508263",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317348665",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:42:28.665490",
+        "message_type": "system"
+      },
+      {
+        "message_id": "msg_1775317356151",
+        "sender_id": "u_13800000000",
+        "sender_name": "陪玩A",
+        "content": "nihao",
+        "timestamp": "2026-04-04T23:42:36.164519",
+        "message_type": "text"
+      },
+      {
+        "message_id": "sys_1775317378108",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:42:58.108760",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317379414",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:42:59.414293",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317641283",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:47:21.283899",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317649327",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:47:29.327459",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317655830",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:47:35.830555",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317659288",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:47:39.288146",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317662540",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:47:42.540163",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317669148",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:47:49.148547",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317702770",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:48:22.770603",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317712510",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:48:32.510878",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317719051",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:48:39.051635",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317723046",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:48:43.046890",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317723549",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:48:43.549312",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775317754488",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:49:14.488482",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318034156",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:53:54.156920",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318040090",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:54:00.090800",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318043309",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-04T23:54:03.309981",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318049071",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-04T23:54:09.071234",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318055696",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:54:15.696290",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318060597",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:54:20.597316",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318065458",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-04T23:54:25.458529",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318071647",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-04T23:54:31.647672",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318496363",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 加入了聊天室",
+        "timestamp": "2026-04-05T00:01:36.363347",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318500986",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "陪玩A 离开了聊天室",
+        "timestamp": "2026-04-05T00:01:40.986703",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318506247",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-05T00:01:46.247853",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318513931",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-05T00:01:53.931835",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318781662",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-05T00:06:21.662083",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318789176",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-05T00:06:29.176865",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318792818",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 加入了聊天室",
+        "timestamp": "2026-04-05T00:06:32.818113",
+        "message_type": "system"
+      },
+      {
+        "message_id": "sys_1775318800770",
+        "sender_id": "system",
+        "sender_name": "系统",
+        "content": "老板C 离开了聊天室",
+        "timestamp": "2026-04-05T00:06:40.770783",
+        "message_type": "system"
+      }
+    ]
+  }
 }

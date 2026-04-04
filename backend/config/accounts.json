@@ -4,21 +4,23 @@
       "phone": "13800000000",
       "sms_code": "123456",
       "user_id": "u_13800000000",
-      "display_name": "当前用户",
-      "role": "boss",
+      "display_name": "陪玩A",
+      "role": "companion",
       "created_at": "2026-04-02T00:00:00.000Z",
-      "updated_at": "2026-04-02T00:00:00.000Z",
-      "last_login_at": "2026-04-03T17:23:43.645465"
+      "updated_at": "2026-04-04T23:39:04.700207",
+      "last_login_at": "2026-04-05T00:05:32.672231",
+      "verification_status": "notStarted"
     },
     {
       "phone": "13900000000",
       "sms_code": "654321",
       "user_id": "u_13900000000",
-      "display_name": "当前用户",
+      "display_name": "老板C",
       "role": "boss",
       "created_at": "2026-04-02T11:24:57.149877",
-      "updated_at": "2026-04-02T11:24:57.149877",
-      "last_login_at": "2026-04-03T17:16:46.707901"
+      "updated_at": "2026-04-04T23:39:15.282028",
+      "last_login_at": "2026-04-05T00:05:41.546960",
+      "verification_status": "approved"
     },
     {
       "phone": "11111111111",
@@ -28,7 +30,8 @@
       "role": "boss",
       "created_at": "2026-04-02T11:34:13.194386",
       "updated_at": "2026-04-04T00:16:23.816502",
-      "last_login_at": "2026-04-04T09:58:14.426922"
+      "last_login_at": "2026-04-04T23:09:46.738492",
+      "verification_status": "notStarted"
     },
     {
       "phone": "11111111112",
@@ -37,7 +40,8 @@
       "display_name": "当前用户",
       "role": "boss",
       "created_at": "2026-04-02T15:54:56.341460",
-      "updated_at": "2026-04-02T15:54:56.341460"
+      "updated_at": "2026-04-02T15:54:56.341460",
+      "verification_status": "notStarted"
     },
     {
       "phone": "11111111113",
@@ -47,7 +51,8 @@
       "role": "boss",
       "created_at": "2026-04-02T16:56:17.992786",
       "updated_at": "2026-04-02T16:56:17.992786",
-      "last_login_at": "2026-04-02T17:57:11.572633"
+      "last_login_at": "2026-04-02T17:57:11.572633",
+      "verification_status": "notStarted"
     },
     {
       "phone": "11111111114",
@@ -57,7 +62,8 @@
       "role": "companion",
       "created_at": "2026-04-02T16:56:26.747035",
       "updated_at": "2026-04-02T16:56:26.747035",
-      "last_login_at": "2026-04-02T17:57:19.422845"
+      "last_login_at": "2026-04-02T17:57:19.422845",
+      "verification_status": "notStarted"
     }
   ]
 }

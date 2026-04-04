@@ -76,6 +76,11 @@ class ChatMessage {
 
 /// WebSocket 聊天服务
 class ChatService {
+  static const String _defaultApiBase = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:9094',
+  );
+
   WebSocketChannel? _channel;
   late StreamController<ChatMessage> _messageController;
   late StreamController<bool> _connectionController;
@@ -113,7 +118,7 @@ class ChatService {
   Future<void> connect({
     required String roomId,
     required String token,
-    String apiBase = 'ws://127.0.0.1:8080',
+    String? apiBase,
   }) async {
     if (_disposed) {
       _messageController = StreamController<ChatMessage>.broadcast();
@@ -126,15 +131,23 @@ class ChatService {
     _manualDisconnect = false;
 
     // 根据 ws:// 或 wss:// 推断 http:// 或 https://
-    if (apiBase.startsWith('wss://')) {
-      _wsBase = apiBase;
-      _httpBase = apiBase.replaceFirst('wss://', 'https://');
-    } else if (apiBase.startsWith('ws://')) {
-      _wsBase = apiBase;
-      _httpBase = apiBase.replaceFirst('ws://', 'http://');
+    final resolvedApiBase = apiBase ?? _defaultApiBase;
+
+    if (resolvedApiBase.startsWith('wss://')) {
+      _wsBase = resolvedApiBase;
+      _httpBase = resolvedApiBase.replaceFirst('wss://', 'https://');
+    } else if (resolvedApiBase.startsWith('ws://')) {
+      _wsBase = resolvedApiBase;
+      _httpBase = resolvedApiBase.replaceFirst('ws://', 'http://');
+    } else if (resolvedApiBase.startsWith('https://')) {
+      _wsBase = resolvedApiBase.replaceFirst('https://', 'wss://');
+      _httpBase = resolvedApiBase;
+    } else if (resolvedApiBase.startsWith('http://')) {
+      _wsBase = resolvedApiBase.replaceFirst('http://', 'ws://');
+      _httpBase = resolvedApiBase;
     } else {
-      _wsBase = 'ws://$apiBase';
-      _httpBase = 'http://$apiBase';
+      _wsBase = 'ws://$resolvedApiBase';
+      _httpBase = 'http://$resolvedApiBase';
     }
 
     await _loadPendingMessages();

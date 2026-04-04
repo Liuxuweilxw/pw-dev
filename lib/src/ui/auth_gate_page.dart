@@ -28,6 +28,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
   String? error;
   bool authenticated = false;
   UserRole authenticatedRole = UserRole.boss;
+  String authenticatedUserId = '';
 
   Future<void> _handleLogout() async {
     if (!mounted) {
@@ -39,6 +40,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
       passwordController.clear();
       error = null;
       submitting = false;
+      authenticatedUserId = '';
     });
   }
 
@@ -88,6 +90,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
       setState(() {
         authenticated = true;
         authenticatedRole = session.role;
+        authenticatedUserId = session.userId;
         submitting = false;
       });
     } catch (e) {
@@ -108,6 +111,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
       return PlatformShell(
         api: widget.api,
         initialRole: authenticatedRole,
+        initialUserId: authenticatedUserId,
         onLogout: _handleLogout,
       );
     }

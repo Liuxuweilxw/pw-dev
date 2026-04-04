@@ -172,6 +172,7 @@ class _BackendApp {
   final List<Map<String, dynamic>> _rooms = [];
   final List<Map<String, dynamic>> _walletFlows = [];
   final List<Map<String, dynamic>> _orders = [];
+  final List<Map<String, dynamic>> _roomInvitations = [];
 
   // 聊天管理器
   final _RoomChatManager _chatManager = _RoomChatManager(
@@ -180,6 +181,8 @@ class _BackendApp {
 
   int _roomSeq = 13000;
   int _orderSeq = 20260402001;
+  int _inviteSeq = 20260402001;
+  static const Duration _inviteTimeout = Duration(minutes: 5);
 
   void _seedData() {
     _rooms
@@ -201,13 +204,22 @@ class _BackendApp {
     router.get('/user/profile', _getUserProfile);
     router.post('/user/profile', _updateUserProfile);
 
+    router.get('/auth/verify/status', _getVerificationStatus);
+    router.get('/auth/verification', _getVerificationStatus);
+    router.post('/auth/verify/id-card', _submitVerification);
+    router.post('/auth/verification', _submitVerification);
+
     router.get('/rooms', _getRooms);
     router.get('/rooms/joined', _getJoinedRooms);
     router.get('/companions', _getCompanions);
     router.post('/rooms', _createRoom);
     router.get('/rooms/<roomId>/members', _getRoomMembers);
+    router.get('/rooms/<roomId>/invitations', _getRoomInvitations);
+    router.get('/invitations/pending', _getPendingInvitations);
     router.post('/rooms/<roomId>/invite', _inviteCompanionToRoom);
+    router.post('/rooms/<roomId>/cancel-invite', _cancelCompanionInvitation);
     router.post('/rooms/<roomId>/accept-order', _acceptCompanionOrder);
+    router.post('/rooms/<roomId>/reject-order', _rejectCompanionOrder);
     router.post('/rooms/<roomId>/join', _joinRoom);
     router.post('/rooms/<roomId>/dissolve', _dissolveRoom);
     router.post('/rooms/<roomId>/complete', _completeRoom);
@@ -288,15 +300,26 @@ class _BackendApp {
         (message) {
           try {
             final json = jsonDecode(message as String) as Map<String, dynamic>;
+            final messageType = (json['message_type'] ?? 'text').toString();
+            final content = (json['content'] ?? '').toString();
+            final eventType = (json['type'] ?? '').toString();
+
+            if (eventType == 'ping' || messageType == 'ping') {
+              return;
+            }
+            if (content.trim().isEmpty) {
+              return;
+            }
+
             final chatMsg = _ChatMessage(
               messageId:
                   json['message_id'] as String? ??
                   'msg_${DateTime.now().millisecondsSinceEpoch}',
               senderId: finalUserId,
-              senderName: json['sender_name'] as String? ?? userName,
-              content: json['content'] as String? ?? '',
+              senderName: userName,
+              content: content,
               timestamp: DateTime.now(),
-              messageType: json['message_type'] as String? ?? 'text',
+              messageType: messageType,
             );
 
             // 广播给房间所有用户
@@ -366,6 +389,7 @@ class _BackendApp {
       'refresh_token': refreshToken,
       'user_id': account.userId,
       'user_role': account.role,
+      'verification_status': account.verificationStatus,
     });
   }
 
@@ -436,6 +460,7 @@ class _BackendApp {
       'refresh_token': refreshToken,
       'user_id': account.userId,
       'user_role': account.role,
+      'verification_status': account.verificationStatus,
     });
   }
 
@@ -495,11 +520,83 @@ class _BackendApp {
     });
   }
 
+  Future<Response> _getVerificationStatus(Request request) async {
+    final currentUserId = _currentUserId(request);
+    if (currentUserId.isEmpty) {
+      return _error('unauthorized', statusCode: 401);
+    }
+
+    final account = _accountStore.findByUserId(currentUserId);
+    if (account == null) {
+      return _error('account not found', statusCode: 404);
+    }
+
+    return _ok(_verificationPayload(account));
+  }
+
+  Future<Response> _submitVerification(Request request) async {
+    final currentUserId = _currentUserId(request);
+    if (currentUserId.isEmpty) {
+      return _error('unauthorized', statusCode: 401);
+    }
+
+    final body = await _readJsonBody(request);
+    final realName = (body['real_name'] ?? '').toString().trim();
+    final idCardNumber = (body['id_card_number'] ?? '').toString().trim();
+    final idFrontUrl = (body['id_front_url'] ?? '').toString().trim();
+    final idBackUrl = (body['id_back_url'] ?? '').toString().trim();
+    final withHandUrl = (body['with_hand_url'] ?? '').toString().trim();
+
+    if (realName.isEmpty ||
+        idCardNumber.isEmpty ||
+        idFrontUrl.isEmpty ||
+        idBackUrl.isEmpty ||
+        withHandUrl.isEmpty) {
+      return _error('实名认证参数无效', statusCode: 400);
+    }
+
+    final account = _accountStore.findByUserId(currentUserId);
+    if (account == null) {
+      return _error('account not found', statusCode: 404);
+    }
+
+    account.verificationStatus = 'pending';
+    account.verificationRealName = realName;
+    account.verificationIdCardNumber = idCardNumber;
+    account.verificationIdFrontUrl = idFrontUrl;
+    account.verificationIdBackUrl = idBackUrl;
+    account.verificationWithHandUrl = withHandUrl;
+    account.verificationRejectReason = null;
+    account.verificationSubmittedAt = DateTime.now();
+    account.verificationVerifiedAt = null;
+    account.updatedAt = DateTime.now();
+    await _accountStore.save();
+
+    return _ok(_verificationPayload(account));
+  }
+
+  Map<String, dynamic> _verificationPayload(_StoredAccount account) {
+    return {
+      'user_id': account.userId,
+      'status': account.verificationStatus,
+      'real_name': account.verificationRealName,
+      'id_card_number': account.verificationIdCardNumber,
+      'id_front_url': account.verificationIdFrontUrl,
+      'id_back_url': account.verificationIdBackUrl,
+      'with_hand_url': account.verificationWithHandUrl,
+      'reject_reason': account.verificationRejectReason,
+      'submitted_at': account.verificationSubmittedAt?.toIso8601String(),
+      'verified_at': account.verificationVerifiedAt?.toIso8601String(),
+    };
+  }
+
   Future<Response> _getRooms(Request request) async {
     final authError = _requireAuth(request);
     if (authError != null) {
       return authError;
     }
+
+    _expirePendingInvitations();
 
     final keyword = (request.url.queryParameters['keyword'] ?? '').trim();
     final filter = (request.url.queryParameters['filter'] ?? '全部').trim();
@@ -522,7 +619,20 @@ class _BackendApp {
           if (role == 'boss' || role == 'companion') {
             final creatorRole = (room['creator_role'] ?? '').toString();
             final creatorUserId = (room['creator_user_id'] ?? '').toString();
-            hitRole = creatorRole != role || creatorUserId == currentUser;
+            if (role == 'companion') {
+              final members = _roomMembers(room);
+              hitRole = members.any((member) {
+                final memberUserId = (member['user_id'] ?? '').toString();
+                final memberStatus = (member['status'] ?? '').toString();
+                return memberUserId == currentUser &&
+                    (memberStatus == '房主' ||
+                        memberStatus == '待确认接单' ||
+                        memberStatus == '已加入' ||
+                        memberStatus == '已接单');
+              });
+            } else {
+              hitRole = creatorRole != role || creatorUserId == currentUser;
+            }
           }
 
           return hitKeyword && hitFilter && hitRole;
@@ -630,9 +740,14 @@ class _BackendApp {
     final list = _rooms
         .where((room) {
           final members = _roomMembers(room);
-          return members.any(
-            (member) => (member['user_id'] ?? '') == currentUserId,
-          );
+          return members.any((member) {
+            final memberUserId = (member['user_id'] ?? '').toString();
+            final memberStatus = (member['status'] ?? '').toString();
+            return memberUserId == currentUserId &&
+                (memberStatus == '房主' ||
+                    memberStatus == '已加入' ||
+                    memberStatus == '已接单');
+          });
         })
         .toList(growable: false);
 
@@ -652,6 +767,68 @@ class _BackendApp {
 
     final members = _roomMembers(room);
     return _ok({'items': members});
+  }
+
+  Future<Response> _getRoomInvitations(Request request, String roomId) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final room = _findRoomById(roomId);
+    if (room == null) {
+      return _error('room not found', statusCode: 404);
+    }
+
+    _expirePendingInvitations(roomId: roomId);
+
+    final currentUserId = _currentUserId(request);
+    final isOwner = (room['creator_user_id'] ?? '').toString() == currentUserId;
+    if (!isOwner) {
+      final members = _roomMembers(room);
+      final isMember = members.any(
+        (member) => (member['user_id'] ?? '').toString() == currentUserId,
+      );
+      if (!isMember) {
+        return _error('无权限查看邀请记录', statusCode: 403);
+      }
+    }
+
+    final items = _roomInvitations
+        .where((item) => (item['room_id'] ?? '').toString() == roomId)
+        .toList(growable: false)
+      ..sort((a, b) {
+        final aTime = (a['created_at'] ?? '').toString();
+        final bTime = (b['created_at'] ?? '').toString();
+        return bTime.compareTo(aTime);
+      });
+
+    return _ok({'items': items});
+  }
+
+  Future<Response> _getPendingInvitations(Request request) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    _expirePendingInvitations();
+
+    final currentUserId = _currentUserId(request);
+    final items = _roomInvitations
+        .where(
+          (item) =>
+              (item['invitee_user_id'] ?? '').toString() == currentUserId &&
+              (item['status'] ?? '').toString() == 'pending',
+        )
+        .toList(growable: false)
+      ..sort((a, b) {
+        final aTime = (a['created_at'] ?? '').toString();
+        final bTime = (b['created_at'] ?? '').toString();
+        return bTime.compareTo(aTime);
+      });
+
+    return _ok({'items': items});
   }
 
   Future<Response> _inviteCompanionToRoom(
@@ -686,6 +863,8 @@ class _BackendApp {
       return _error('陪玩不存在', statusCode: 404);
     }
 
+    _expirePendingInvitations(roomId: roomId);
+
     final companionName = _displayNameFromUserId(companionId);
 
     final seatsLeft = _toInt(room['seats_left']);
@@ -698,11 +877,41 @@ class _BackendApp {
       return _error('该陪玩已在房间中', statusCode: 409);
     }
 
+    final hasPendingInvite = _roomInvitations.any(
+      (item) =>
+          (item['room_id'] ?? '').toString() == roomId &&
+          (item['invitee_user_id'] ?? '').toString() == companionId &&
+          (item['status'] ?? '').toString() == 'pending',
+    );
+    if (hasPendingInvite) {
+      return _error('该陪玩已有待处理邀请', statusCode: 409);
+    }
+
+    _inviteSeq += 1;
+    final inviteId = 'INV-$_inviteSeq';
+    final now = DateTime.now();
+    final expiresAt = now.add(_inviteTimeout);
+    _roomInvitations.insert(0, {
+      'invite_id': inviteId,
+      'room_id': roomId,
+      'room_title': (room['title'] ?? '').toString(),
+      'inviter_user_id': currentUserId,
+      'inviter_user_name': _displayNameFromUserId(currentUserId),
+      'invitee_user_id': companionId,
+      'invitee_user_name': companionName,
+      'status': 'pending',
+      'created_at': now.toIso8601String(),
+      'expires_at': expiresAt.toIso8601String(),
+      'decided_at': null,
+      'reject_reason': null,
+    });
+
     members.add({
       'user_id': companionId,
       'user_name': companionName,
       'role': 'companion',
       'status': '待确认接单',
+      'invite_id': inviteId,
     });
     room['members'] = members;
 
@@ -720,12 +929,27 @@ class _BackendApp {
       return _error('room not found', statusCode: 404);
     }
 
+    final currentUserId = _currentUserId(request);
+    _expirePendingInvitations(roomId: roomId);
+
+    final invitation = _findPendingInvitation(
+      roomId: roomId,
+      inviteeUserId: currentUserId,
+    );
+    if (invitation == null) {
+      return _error('当前房间没有你的待接单邀请', statusCode: 403);
+    }
+
     final roomStatus = (room['status'] ?? '').toString();
     if (roomStatus == '已完成' || roomStatus == '已解散') {
+      _markInvitationFailed(
+        invitation,
+        reason: '房间状态不可接单',
+        removePendingMember: true,
+      );
       return _error('当前房间状态不允许接单', statusCode: 409);
     }
 
-    final currentUserId = _currentUserId(request);
     final members = _roomMembers(room);
     final memberIndex = members.indexWhere(
       (member) =>
@@ -739,16 +963,30 @@ class _BackendApp {
 
     final memberStatus = (members[memberIndex]['status'] ?? '').toString();
     if (memberStatus != '待确认接单') {
+      _markInvitationFailed(
+        invitation,
+        reason: '邀请状态不可接单',
+        removePendingMember: false,
+      );
       return _error('当前邀请状态不可确认接单', statusCode: 409);
     }
 
     final seatsLeft = _toInt(room['seats_left']);
     if (seatsLeft <= 0) {
+      _markInvitationFailed(
+        invitation,
+        reason: '房间已满',
+        removePendingMember: true,
+      );
       return _error('房间已满', statusCode: 409);
     }
 
     members[memberIndex]['status'] = '已接单';
+    members[memberIndex].remove('invite_id');
     room['members'] = members;
+
+    invitation['status'] = 'accepted';
+    invitation['decided_at'] = DateTime.now().toIso8601String();
 
     final updatedSeats = seatsLeft - 1;
     room['seats_left'] = updatedSeats;
@@ -766,6 +1004,108 @@ class _BackendApp {
       'room_title': room['title'],
       'settle_to': currentUserId,
     });
+
+    return _ok(room);
+  }
+
+  Future<Response> _cancelCompanionInvitation(
+    Request request,
+    String roomId,
+  ) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final room = _findRoomById(roomId);
+    if (room == null) {
+      return _error('room not found', statusCode: 404);
+    }
+
+    final currentUserId = _currentUserId(request);
+    if ((room['creator_user_id'] ?? '').toString() != currentUserId) {
+      return _error('仅房主可取消邀请', statusCode: 403);
+    }
+
+    final body = await _readJsonBody(request);
+    final companionId = (body['companion_id'] ?? '').toString();
+    if (companionId.isEmpty) {
+      return _error('companion_id 参数无效', statusCode: 400);
+    }
+
+    _expirePendingInvitations(roomId: roomId);
+
+    final invitation = _findPendingInvitation(
+      roomId: roomId,
+      inviteeUserId: companionId,
+    );
+    if (invitation == null) {
+      return _error('未找到可取消的待处理邀请', statusCode: 404);
+    }
+
+    invitation['status'] = 'cancelled';
+    invitation['decided_at'] = DateTime.now().toIso8601String();
+    invitation['reject_reason'] = 'inviter_cancelled';
+
+    final members = _roomMembers(room);
+    members.removeWhere(
+      (member) =>
+          (member['user_id'] ?? '').toString() == companionId &&
+          (member['status'] ?? '').toString() == '待确认接单',
+    );
+    room['members'] = members;
+
+    return _ok({'success': true, 'room': room});
+  }
+
+  Future<Response> _rejectCompanionOrder(Request request, String roomId) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final room = _findRoomById(roomId);
+    if (room == null) {
+      return _error('room not found', statusCode: 404);
+    }
+
+    final roomStatus = (room['status'] ?? '').toString();
+    if (roomStatus == '已完成' || roomStatus == '已解散') {
+      return _error('当前房间状态不允许拒绝接单', statusCode: 409);
+    }
+
+    final currentUserId = _currentUserId(request);
+    _expirePendingInvitations(roomId: roomId);
+
+    final invitation = _findPendingInvitation(
+      roomId: roomId,
+      inviteeUserId: currentUserId,
+    );
+    if (invitation == null) {
+      return _error('当前房间没有你的待接单邀请', statusCode: 403);
+    }
+
+    final members = _roomMembers(room);
+    final memberIndex = members.indexWhere(
+      (member) =>
+          (member['user_id'] ?? '').toString() == currentUserId &&
+          (member['role'] ?? '').toString() == 'companion',
+    );
+
+    if (memberIndex < 0) {
+      return _error('当前房间没有你的待接单邀请', statusCode: 403);
+    }
+
+    final memberStatus = (members[memberIndex]['status'] ?? '').toString();
+    if (memberStatus != '待确认接单') {
+      return _error('当前邀请状态不可拒绝接单', statusCode: 409);
+    }
+
+    members.removeAt(memberIndex);
+    room['members'] = members;
+
+    invitation['status'] = 'rejected';
+    invitation['decided_at'] = DateTime.now().toIso8601String();
 
     return _ok(room);
   }
@@ -1183,8 +1523,11 @@ class _BackendApp {
       return '当前用户';
     }
     final account = _accountStore.findByUserId(userId);
-    if (account != null && account.displayName.trim().isNotEmpty) {
-      return account.displayName.trim();
+    if (account != null) {
+      final displayName = account.displayName.trim();
+      if (displayName.isNotEmpty && displayName != '当前用户') {
+        return displayName;
+      }
     }
     if (userId.startsWith('u_')) {
       final suffix = userId.substring(2);
@@ -1219,6 +1562,93 @@ class _BackendApp {
       return raw.whereType<Map<String, dynamic>>().toList(growable: true);
     }
     return <Map<String, dynamic>>[];
+  }
+
+  Map<String, dynamic>? _findPendingInvitation({
+    required String roomId,
+    required String inviteeUserId,
+  }) {
+    for (final invitation in _roomInvitations) {
+      if ((invitation['room_id'] ?? '').toString() != roomId) {
+        continue;
+      }
+      if ((invitation['invitee_user_id'] ?? '').toString() != inviteeUserId) {
+        continue;
+      }
+      if ((invitation['status'] ?? '').toString() != 'pending') {
+        continue;
+      }
+      return invitation;
+    }
+    return null;
+  }
+
+  void _expirePendingInvitations({String? roomId}) {
+    final now = DateTime.now();
+    for (final invitation in _roomInvitations) {
+      if ((invitation['status'] ?? '').toString() != 'pending') {
+        continue;
+      }
+      if (roomId != null && (invitation['room_id'] ?? '').toString() != roomId) {
+        continue;
+      }
+
+      final expiresAtText = (invitation['expires_at'] ?? '').toString();
+      final expiresAt = DateTime.tryParse(expiresAtText);
+      if (expiresAt == null || now.isBefore(expiresAt)) {
+        continue;
+      }
+
+      invitation['status'] = 'expired';
+      invitation['decided_at'] = now.toIso8601String();
+
+      final targetRoomId = (invitation['room_id'] ?? '').toString();
+      final inviteeUserId = (invitation['invitee_user_id'] ?? '').toString();
+      final room = _findRoomById(targetRoomId);
+      if (room == null) {
+        continue;
+      }
+      final members = _roomMembers(room);
+      members.removeWhere(
+        (member) =>
+            (member['user_id'] ?? '').toString() == inviteeUserId &&
+            (member['status'] ?? '').toString() == '待确认接单',
+      );
+      room['members'] = members;
+    }
+  }
+
+  void _markInvitationFailed(
+    Map<String, dynamic> invitation, {
+    required String reason,
+    required bool removePendingMember,
+  }) {
+    if ((invitation['status'] ?? '').toString() != 'pending') {
+      return;
+    }
+
+    invitation['status'] = 'failed';
+    invitation['decided_at'] = DateTime.now().toIso8601String();
+    invitation['reject_reason'] = reason;
+
+    if (!removePendingMember) {
+      return;
+    }
+
+    final roomId = (invitation['room_id'] ?? '').toString();
+    final inviteeUserId = (invitation['invitee_user_id'] ?? '').toString();
+    final room = _findRoomById(roomId);
+    if (room == null) {
+      return;
+    }
+
+    final members = _roomMembers(room);
+    members.removeWhere(
+      (member) =>
+          (member['user_id'] ?? '').toString() == inviteeUserId &&
+          (member['status'] ?? '').toString() == '待确认接单',
+    );
+    room['members'] = members;
   }
 
   String? _extractToken(Request request) {
@@ -1315,6 +1745,15 @@ class _StoredAccount {
     required this.createdAt,
     required this.updatedAt,
     this.lastLoginAt,
+    this.verificationStatus = 'notStarted',
+    this.verificationRealName,
+    this.verificationIdCardNumber,
+    this.verificationIdFrontUrl,
+    this.verificationIdBackUrl,
+    this.verificationWithHandUrl,
+    this.verificationRejectReason,
+    this.verificationSubmittedAt,
+    this.verificationVerifiedAt,
   });
 
   String phone;
@@ -1325,6 +1764,15 @@ class _StoredAccount {
   final DateTime createdAt;
   DateTime updatedAt;
   DateTime? lastLoginAt;
+  String verificationStatus;
+  String? verificationRealName;
+  String? verificationIdCardNumber;
+  String? verificationIdFrontUrl;
+  String? verificationIdBackUrl;
+  String? verificationWithHandUrl;
+  String? verificationRejectReason;
+  DateTime? verificationSubmittedAt;
+  DateTime? verificationVerifiedAt;
 
   factory _StoredAccount.fromJson(Map<String, dynamic> json) {
     return _StoredAccount(
@@ -1336,6 +1784,17 @@ class _StoredAccount {
       createdAt: _parseDateTime(json['created_at']) ?? DateTime.now(),
       updatedAt: _parseDateTime(json['updated_at']) ?? DateTime.now(),
       lastLoginAt: _parseDateTime(json['last_login_at']),
+      verificationStatus:
+          (json['verification_status'] ?? 'notStarted').toString(),
+      verificationRealName: json['verification_real_name']?.toString(),
+      verificationIdCardNumber: json['verification_id_card_number']?.toString(),
+      verificationIdFrontUrl: json['verification_id_front_url']?.toString(),
+      verificationIdBackUrl: json['verification_id_back_url']?.toString(),
+      verificationWithHandUrl: json['verification_with_hand_url']?.toString(),
+      verificationRejectReason: json['verification_reject_reason']?.toString(),
+      verificationSubmittedAt:
+          _parseDateTime(json['verification_submitted_at']),
+      verificationVerifiedAt: _parseDateTime(json['verification_verified_at']),
     );
   }
 
@@ -1349,6 +1808,23 @@ class _StoredAccount {
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       if (lastLoginAt != null) 'last_login_at': lastLoginAt!.toIso8601String(),
+      'verification_status': verificationStatus,
+      if (verificationRealName != null)
+        'verification_real_name': verificationRealName,
+      if (verificationIdCardNumber != null)
+        'verification_id_card_number': verificationIdCardNumber,
+      if (verificationIdFrontUrl != null)
+        'verification_id_front_url': verificationIdFrontUrl,
+      if (verificationIdBackUrl != null)
+        'verification_id_back_url': verificationIdBackUrl,
+      if (verificationWithHandUrl != null)
+        'verification_with_hand_url': verificationWithHandUrl,
+      if (verificationRejectReason != null)
+        'verification_reject_reason': verificationRejectReason,
+      if (verificationSubmittedAt != null)
+        'verification_submitted_at': verificationSubmittedAt!.toIso8601String(),
+      if (verificationVerifiedAt != null)
+        'verification_verified_at': verificationVerifiedAt!.toIso8601String(),
     };
   }
 }

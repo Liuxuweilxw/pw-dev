@@ -19,11 +19,13 @@ class PlatformShell extends StatefulWidget {
     super.key,
     required this.api,
     this.initialRole = UserRole.boss,
+    this.initialUserId = '',
     this.onLogout,
   });
 
   final PlatformApi api;
   final UserRole initialRole;
+  final String initialUserId;
   final Future<void> Function()? onLogout;
 
   @override
@@ -33,6 +35,7 @@ class PlatformShell extends StatefulWidget {
 class _PlatformShellState extends State<PlatformShell> {
   int navIndex = 0;
   late UserRole role;
+  late String currentUserId;
   IdentityVerification verification = const IdentityVerification();
   String roomKeyword = '';
   String roomFilter = '全部';
@@ -46,6 +49,7 @@ class _PlatformShellState extends State<PlatformShell> {
 
   List<RoomItem> rooms = const [];
   List<RoomItem> joinedRooms = const [];
+  List<InvitationItem> pendingInvitations = const [];
   List<CompanionItem> companions = const [];
   List<WalletFlowItem> walletFlows = const [];
   List<OrderItem> orders = const [];
@@ -144,6 +148,7 @@ class _PlatformShellState extends State<PlatformShell> {
   void initState() {
     super.initState();
     role = widget.initialRole;
+    currentUserId = widget.initialUserId;
     _loadDashboard();
     _startCompanionAutoRefresh();
   }
@@ -183,6 +188,7 @@ class _PlatformShellState extends State<PlatformShell> {
           filter: roomFilter,
         ),
         widget.api.fetchJoinedRooms(),
+        widget.api.fetchPendingInvitations(),
         widget.api.fetchCompanions(),
         widget.api.fetchWalletFlows(),
         widget.api.fetchOrders(),
@@ -204,12 +210,13 @@ class _PlatformShellState extends State<PlatformShell> {
       setState(() {
         rooms = result[0] as List<RoomItem>;
         joinedRooms = result[1] as List<RoomItem>;
-        companions = result[2] as List<CompanionItem>;
-        walletFlows = result[3] as List<WalletFlowItem>;
-        orders = result[4] as List<OrderItem>;
-        verification = result[5] as IdentityVerification;
-        userBalance = result[6] as UserBalance?;
-        userProfile = result[7] as UserProfile?;
+        pendingInvitations = result[2] as List<InvitationItem>;
+        companions = result[3] as List<CompanionItem>;
+        walletFlows = result[4] as List<WalletFlowItem>;
+        orders = result[5] as List<OrderItem>;
+        verification = result[6] as IdentityVerification;
+        userBalance = result[7] as UserBalance?;
+        userProfile = result[8] as UserProfile?;
         loadError = null;
         isLoading = false;
       });
@@ -241,9 +248,13 @@ class _PlatformShellState extends State<PlatformShell> {
       final companionsFuture = role == UserRole.boss
           ? widget.api.fetchCompanions()
           : Future.value(const <CompanionItem>[]);
+      final pendingInvitationsFuture = role == UserRole.companion
+          ? widget.api.fetchPendingInvitations()
+          : Future.value(const <InvitationItem>[]);
       final result = await Future.wait<dynamic>([
         roomFuture,
         joinedRoomsFuture,
+        pendingInvitationsFuture,
         companionsFuture,
       ]);
       if (!mounted) {
@@ -252,7 +263,8 @@ class _PlatformShellState extends State<PlatformShell> {
       setState(() {
         rooms = result[0] as List<RoomItem>;
         joinedRooms = result[1] as List<RoomItem>;
-        companions = result[2] as List<CompanionItem>;
+        pendingInvitations = result[2] as List<InvitationItem>;
+        companions = result[3] as List<CompanionItem>;
       });
       return true;
     } catch (e) {
@@ -940,6 +952,73 @@ class _PlatformShellState extends State<PlatformShell> {
                 .toList(),
           ),
         ),
+        if (role == UserRole.companion && pendingInvitations.isNotEmpty) ...[
+          _surfaceCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '待处理邀请',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                ...pendingInvitations.map(
+                  (invitation) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            invitation.roomTitle.isEmpty
+                                ? invitation.roomId
+                                : invitation.roomTitle,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '邀请人：${invitation.inviterUserName.isEmpty ? invitation.inviterUserId : invitation.inviterUserName}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF6B7280),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              FilledButton(
+                                onPressed: () =>
+                                    _acceptPendingInvitation(invitation),
+                                child: const Text('同意'),
+                              ),
+                              FilledButton.tonal(
+                                onPressed: () =>
+                                    _rejectPendingInvitation(invitation),
+                                child: const Text('拒绝'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         if (joinedRooms.isNotEmpty) ...[
           const SizedBox(height: 16),
           _surfaceCard(
@@ -969,10 +1048,13 @@ class _PlatformShellState extends State<PlatformShell> {
           const SizedBox(height: 12),
         ],
         ...filteredRooms.map((room) {
-          final statusColor = room.status == '进行中'
+          final displayStatus = _roomDisplayStatus(room);
+          final statusColor = displayStatus == '进行中'
               ? const Color(0xFF34C759)
-              : room.status == '紧急'
+              : displayStatus == '紧急'
               ? const Color(0xFFFF3B30)
+              : displayStatus == '已加入'
+              ? const Color(0xFF10B981)
               : const Color(0xFF0071E3);
 
           return Padding(
@@ -1023,7 +1105,7 @@ class _PlatformShellState extends State<PlatformShell> {
                               ],
                             ),
                           ),
-                          _statusBadge(room.status, statusColor),
+                          _statusBadge(displayStatus, statusColor),
                         ],
                       ),
                       const SizedBox(height: 14),
@@ -2236,7 +2318,7 @@ class _PlatformShellState extends State<PlatformShell> {
 
       HapticFeedbackUtil.mediumImpact();
 
-      final newRoom = await widget.api.createRoom(
+      await widget.api.createRoom(
         roomTitle: payload.title,
         unitPrice: payload.unitPrice,
         contribution: payload.contribution,
@@ -2255,12 +2337,7 @@ class _PlatformShellState extends State<PlatformShell> {
         return;
       }
 
-      // 自动打开新创建的房间详情
-      _showSnackBar('房间已创建，即将进入房间...');
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) {
-        await _openRoomDetail(newRoom);
-      }
+      _showSnackBar('房间已创建，已返回大厅');
     } catch (e) {
       _showSnackBar('创建房间失败：$e');
     } finally {
@@ -2412,11 +2489,24 @@ class _PlatformShellState extends State<PlatformShell> {
           initialMembers: initialMembers,
           api: widget.api,
           currentUserRole: role,
+          currentUserId: currentUserId,
+          currentUserDisplayName: profileDisplayName,
           onRoomUpdated: () => _loadRooms(),
           showSnackBar: _showSnackBar,
         ),
       ),
     );
+  }
+
+  bool _isJoinedRoom(String roomId) {
+    return joinedRooms.any((room) => room.id == roomId);
+  }
+
+  String _roomDisplayStatus(RoomItem room) {
+    if (room.status == '待加入' && _isJoinedRoom(room.id)) {
+      return '已加入';
+    }
+    return room.status;
   }
 
   Future<void> _inviteCompanionFromLobby(CompanionItem companion) async {
@@ -2493,6 +2583,26 @@ class _PlatformShellState extends State<PlatformShell> {
       _showSnackBar('已邀请 ${companion.name} 加入房间');
     } catch (e) {
       _showSnackBar('邀请失败：$e');
+    }
+  }
+
+  Future<void> _acceptPendingInvitation(InvitationItem invitation) async {
+    try {
+      await widget.api.confirmCompanionOrder(roomId: invitation.roomId);
+      await _loadRooms(showFailureHint: false);
+      _showSnackBar('已同意邀请并加入房间');
+    } catch (e) {
+      _showSnackBar('处理邀请失败：$e');
+    }
+  }
+
+  Future<void> _rejectPendingInvitation(InvitationItem invitation) async {
+    try {
+      await widget.api.rejectCompanionOrder(roomId: invitation.roomId);
+      await _loadRooms(showFailureHint: false);
+      _showSnackBar('已拒绝邀请，房间已从大厅移除');
+    } catch (e) {
+      _showSnackBar('处理邀请失败：$e');
     }
   }
 
@@ -2930,6 +3040,8 @@ class _RoomChatPage extends StatefulWidget {
     required this.initialMembers,
     required this.api,
     required this.currentUserRole,
+    required this.currentUserId,
+    required this.currentUserDisplayName,
     required this.onRoomUpdated,
     required this.showSnackBar,
   });
@@ -2938,6 +3050,8 @@ class _RoomChatPage extends StatefulWidget {
   final List<RoomMemberItem> initialMembers;
   final PlatformApi api;
   final UserRole currentUserRole;
+  final String currentUserId;
+  final String currentUserDisplayName;
   final VoidCallback onRoomUpdated;
   final void Function(String) showSnackBar;
 
@@ -2952,6 +3066,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   final List<ChatMessage> _messages = [];
   final Set<String> _messageIds = <String>{};
   Timer? _typingDebounce;
+  Timer? _memberRefreshTimer;
+  final Set<String> _rejectedCompanionNotified = <String>{};
+  final Set<String> _invitationStatusNotified = <String>{};
+  bool _isRejectDialogShowing = false;
 
   late RoomItem _currentRoom;
   late List<RoomMemberItem> _members;
@@ -2967,6 +3085,132 @@ class _RoomChatPageState extends State<_RoomChatPage> {
     _currentRoom = widget.room;
     _members = List<RoomMemberItem>.from(widget.initialMembers);
     _initChat();
+    _startMemberAutoRefresh();
+  }
+
+  void _startMemberAutoRefresh() {
+    _memberRefreshTimer?.cancel();
+    if (widget.currentUserRole != UserRole.boss) {
+      return;
+    }
+
+    _memberRefreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _refreshMembersAndNotifyRejection();
+    });
+  }
+
+  Future<void> _refreshMembersAndNotifyRejection() async {
+    if (!mounted || _isProcessing) {
+      return;
+    }
+
+    try {
+      final updatedMembers = await widget.api.fetchRoomMembers(
+        roomId: _currentRoom.id,
+      );
+      final invitations = await widget.api.fetchRoomInvitations(
+        roomId: _currentRoom.id,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _members = List<RoomMemberItem>.from(updatedMembers);
+      });
+
+      for (final invitation in invitations) {
+        if (invitation.inviterUserId != widget.currentUserId) {
+          continue;
+        }
+
+        final notifyKey = '${invitation.inviteId}:${invitation.status}';
+        if (_invitationStatusNotified.contains(notifyKey)) {
+          continue;
+        }
+
+        if (invitation.isRejected) {
+          _invitationStatusNotified.add(notifyKey);
+          _rejectedCompanionNotified.add(invitation.inviteeUserId);
+          await _showCompanionRejectedDialog(invitation.inviteeUserName);
+        } else if (invitation.isAccepted) {
+          _invitationStatusNotified.add(notifyKey);
+          await _showInvitationStatusDialog(
+            title: '邀请已被接受',
+            content:
+                '${invitation.inviteeUserName.isEmpty ? '该陪玩' : invitation.inviteeUserName} 已同意邀请，已加入当前房间。',
+          );
+        } else if (invitation.isFailed) {
+          _invitationStatusNotified.add(notifyKey);
+          await _showInvitationStatusDialog(
+            title: '邀请处理失败',
+            content:
+                '${invitation.inviteeUserName.isEmpty ? '该陪玩' : invitation.inviteeUserName} 的邀请处理失败，请重新发起邀请。',
+          );
+        } else if (invitation.isExpired) {
+          _invitationStatusNotified.add(notifyKey);
+          await _showInvitationStatusDialog(
+            title: '邀请已超时',
+            content:
+                '${invitation.inviteeUserName.isEmpty ? '该陪玩' : invitation.inviteeUserName} 未在有效期内处理邀请，已自动移出当前房间。',
+          );
+        }
+      }
+    } catch (_) {
+      // Ignore background polling errors to avoid interrupting chat interaction.
+    }
+  }
+
+  Future<void> _showInvitationStatusDialog({
+    required String title,
+    required String content,
+  }) async {
+    if (!mounted || _isRejectDialogShowing) {
+      return;
+    }
+
+    _isRejectDialogShowing = true;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(content),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('我知道了'),
+            ),
+          ],
+        );
+      },
+    );
+
+    _isRejectDialogShowing = false;
+    if (mounted) {
+      widget.onRoomUpdated();
+    }
+  }
+
+  Future<void> _showCompanionRejectedDialog(String companionName) async {
+    final resolvedName = companionName.trim().isEmpty ? '该陪玩' : companionName;
+    await _showInvitationStatusDialog(
+      title: '邀请已被拒绝',
+      content: '$resolvedName 已拒绝你的邀请，并已自动移出当前房间。',
+    );
+  }
+
+  List<RoomMemberItem> _pendingCompanionMembers() {
+    if (widget.currentUserRole != UserRole.boss) {
+      return const [];
+    }
+    return _members
+        .where(
+          (member) =>
+              member.role == UserRole.companion.name &&
+              member.status == '待确认接单',
+        )
+        .toList(growable: false);
   }
 
   Future<void> _initChat() async {
@@ -2991,7 +3235,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
 
     // 连接聊天室
     try {
-      await _chatService.connect(roomId: widget.room.id, token: 'mock-token');
+      await _chatService.connect(
+        roomId: widget.room.id,
+        token: widget.api.authToken,
+      );
       await _loadHistory();
       if (mounted) {
         setState(() {
@@ -3050,6 +3297,7 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   @override
   void dispose() {
     _typingDebounce?.cancel();
+    _memberRefreshTimer?.cancel();
     _messageSubscription?.cancel();
     _connectionSubscription?.cancel();
     _chatService.dispose();
@@ -3065,8 +3313,8 @@ class _RoomChatPageState extends State<_RoomChatPage> {
     try {
       await _chatService.sendMessage(
         text,
-        senderId: 'mock-user',
-        senderName: widget.currentUserRole == UserRole.boss ? '老板' : '陪玩',
+        senderId: widget.currentUserId,
+        senderName: widget.currentUserDisplayName,
       );
       _messageController.clear();
       if (mounted) {
@@ -3133,7 +3381,7 @@ class _RoomChatPageState extends State<_RoomChatPage> {
               children: [
                 _buildInfoRow('房间ID', _currentRoom.id),
                 _buildInfoRow('房主', _currentRoom.owner),
-                _buildInfoRow('状态', _currentRoom.status),
+                _buildInfoRow('状态', _displayRoomStatus()),
                 _buildInfoRow('单价', '¥${_currentRoom.price}'),
                 _buildInfoRow('剩余座位', '${_currentRoom.seatsLeft}'),
                 _buildInfoRow('出资比例', _currentRoom.contribution),
@@ -3234,13 +3482,38 @@ class _RoomChatPageState extends State<_RoomChatPage> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    if (widget.currentUserRole == UserRole.companion)
+                    if (widget.currentUserRole == UserRole.boss)
+                      ..._pendingCompanionMembers().map(
+                        (member) => _buildActionButton(
+                          icon: Icons.person_remove_alt_1_rounded,
+                          label: '取消邀请 ${member.userName}',
+                          onPressed: _isProcessing
+                              ? null
+                              : () => _cancelInvitation(member),
+                        ),
+                      ),
+                    if (widget.currentUserRole == UserRole.companion &&
+                        _currentInvitationStatus() == '待确认接单') ...[
+                      _buildActionButton(
+                        icon: Icons.verified_rounded,
+                        label: '同意邀请',
+                        onPressed: _isProcessing ? null : _confirmOrder,
+                        isPrimary: true,
+                      ),
+                      _buildActionButton(
+                        icon: Icons.close_rounded,
+                        label: '拒绝邀请',
+                        onPressed: _isProcessing ? null : _rejectOrder,
+                        isDanger: true,
+                      ),
+                    ] else if (widget.currentUserRole == UserRole.companion) ...[
                       _buildActionButton(
                         icon: Icons.verified_rounded,
                         label: '确认接单',
                         onPressed: _isProcessing ? null : _confirmOrder,
                         isPrimary: true,
                       ),
+                    ],
                     if (widget.currentUserRole == UserRole.boss)
                       _buildActionButton(
                         icon: Icons.delete_outline_rounded,
@@ -3370,6 +3643,54 @@ class _RoomChatPageState extends State<_RoomChatPage> {
     }
   }
 
+  Future<void> _rejectOrder() async {
+    try {
+      setState(() => _isProcessing = true);
+      final updatedRoom = await widget.api.rejectCompanionOrder(
+        roomId: _currentRoom.id,
+      );
+      final updatedMembers = await widget.api.fetchRoomMembers(
+        roomId: _currentRoom.id,
+      );
+      widget.onRoomUpdated();
+      setState(() {
+        _currentRoom = updatedRoom;
+        _members = List<RoomMemberItem>.from(updatedMembers);
+      });
+      widget.showSnackBar('已拒绝邀请');
+      if (mounted) {
+        Navigator.of(context).pop();
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      widget.showSnackBar('拒绝邀请失败：$e');
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _cancelInvitation(RoomMemberItem member) async {
+    try {
+      setState(() => _isProcessing = true);
+      await widget.api.cancelCompanionInvitation(
+        roomId: _currentRoom.id,
+        companionId: member.userId,
+      );
+      final updatedMembers = await widget.api.fetchRoomMembers(
+        roomId: _currentRoom.id,
+      );
+      widget.onRoomUpdated();
+      setState(() {
+        _members = List<RoomMemberItem>.from(updatedMembers);
+      });
+      widget.showSnackBar('已取消对 ${member.userName} 的邀请');
+    } catch (e) {
+      widget.showSnackBar('取消邀请失败：$e');
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
   Future<void> _dissolveRoom() async {
     try {
       setState(() => _isProcessing = true);
@@ -3414,7 +3735,7 @@ class _RoomChatPageState extends State<_RoomChatPage> {
 📌 房间：${_currentRoom.title}
 💰 单价：¥${_currentRoom.price}
 👥 人数：${_members.length}/$totalSeats人
-📊 状态：${_currentRoom.status}
+📊 状态：${_displayRoomStatus()}
 
 👉 点击加入：https://delta.example/rooms/${_currentRoom.id}
 ''';
@@ -3508,6 +3829,37 @@ class _RoomChatPageState extends State<_RoomChatPage> {
     );
   }
 
+  String _currentInvitationStatus() {
+    final currentMember = _members.firstWhere(
+      (member) => member.userId == widget.currentUserId,
+      orElse: () => const RoomMemberItem(
+        userId: '',
+        userName: '',
+        role: '',
+        status: '',
+      ),
+    );
+    return currentMember.userId.isEmpty ? '' : currentMember.status;
+  }
+
+  String _displayRoomStatus() {
+    final currentMember = _members.firstWhere(
+      (member) => member.userId == widget.currentUserId,
+      orElse: () => const RoomMemberItem(
+        userId: '',
+        userName: '',
+        role: '',
+        status: '',
+      ),
+    );
+    if (currentMember.userId.isNotEmpty &&
+        _currentRoom.status == '待加入' &&
+        (currentMember.status == '已加入' || currentMember.status == '已接单')) {
+      return currentMember.status;
+    }
+    return _currentRoom.status;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isBoss = widget.currentUserRole == UserRole.boss;
@@ -3522,7 +3874,7 @@ class _RoomChatPageState extends State<_RoomChatPage> {
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             Text(
-              '${_members.length}人 · ${_currentRoom.status}',
+              '${_members.length}人 · ${_displayRoomStatus()}',
               style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
             ),
           ],
@@ -3626,7 +3978,7 @@ class _RoomChatPageState extends State<_RoomChatPage> {
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
                         final message = _messages[index];
-                        final isMe = message.senderId == 'mock-user';
+                        final isMe = message.senderId == widget.currentUserId;
                         final isSystem = message.isSystemMessage;
 
                         // 系统消息居中显示
