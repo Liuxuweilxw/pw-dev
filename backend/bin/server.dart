@@ -198,6 +198,8 @@ class _BackendApp {
     router.post('/auth/register/sms', _registerWithSms);
     router.post('/auth/role', _updateRole);
     router.post('/auth/logout', _logout);
+    router.get('/user/profile', _getUserProfile);
+    router.post('/user/profile', _updateUserProfile);
 
     router.get('/rooms', _getRooms);
     router.get('/rooms/joined', _getJoinedRooms);
@@ -243,7 +245,7 @@ class _BackendApp {
       if (userId != null) {
         finalUserId = userId;
         final account = _accountStore.findByUserId(userId);
-        userName = account?.phone ?? '用户$userId';
+        userName = account?.displayName ?? _displayNameFromUserId(userId);
         userRole = account?.role ?? 'boss';
       } else if (token == 'mock-token') {
         // 支持 mock 模式
@@ -403,6 +405,7 @@ class _BackendApp {
     final phone = (body['phone'] ?? '').toString().trim();
     final smsCode = (body['sms_code'] ?? '').toString().trim();
     final userRole = (body['user_role'] ?? 'boss').toString().trim();
+    final displayName = (body['display_name'] ?? '').toString().trim();
 
     if (phone.isEmpty || smsCode.isEmpty) {
       return _error('phone 或 sms_code 不能为空', statusCode: 400);
@@ -420,6 +423,7 @@ class _BackendApp {
       phone: phone,
       smsCode: smsCode,
       role: userRole,
+      displayName: displayName,
     );
     final accessToken = 'token_${DateTime.now().millisecondsSinceEpoch}_$phone';
     final refreshToken =
@@ -432,6 +436,62 @@ class _BackendApp {
       'refresh_token': refreshToken,
       'user_id': account.userId,
       'user_role': account.role,
+    });
+  }
+
+  Future<Response> _getUserProfile(Request request) async {
+    final currentUserId = _currentUserId(request);
+    if (currentUserId.isEmpty) {
+      return _error('unauthorized', statusCode: 401);
+    }
+
+    final account = _accountStore.findByUserId(currentUserId);
+    if (account == null) {
+      return _error('account not found', statusCode: 404);
+    }
+
+    return _ok({
+      'user_id': account.userId,
+      'display_name': account.displayName,
+      'phone': account.phone,
+    });
+  }
+
+  Future<Response> _updateUserProfile(Request request) async {
+    final currentUserId = _currentUserId(request);
+    if (currentUserId.isEmpty) {
+      return _error('unauthorized', statusCode: 401);
+    }
+
+    final body = await _readJsonBody(request);
+    final displayName = (body['display_name'] ?? '').toString().trim();
+    final phone = (body['phone'] ?? '').toString().trim();
+    final password = (body['password'] ?? '').toString().trim();
+
+    if (displayName.isEmpty || phone.isEmpty) {
+      return _error('display_name/phone 不能为空', statusCode: 400);
+    }
+
+    _StoredAccount? account;
+    try {
+      account = await _accountStore.updateProfile(
+        userId: currentUserId,
+        displayName: displayName,
+        phone: phone,
+        password: password.isEmpty ? null : password,
+      );
+    } on FormatException catch (e) {
+      return _error(e.message, statusCode: 409);
+    }
+
+    if (account == null) {
+      return _error('account not found', statusCode: 404);
+    }
+
+    return _ok({
+      'user_id': account.userId,
+      'display_name': account.displayName,
+      'phone': account.phone,
     });
   }
 
@@ -1122,6 +1182,10 @@ class _BackendApp {
     if (userId.isEmpty) {
       return '当前用户';
     }
+    final account = _accountStore.findByUserId(userId);
+    if (account != null && account.displayName.trim().isNotEmpty) {
+      return account.displayName.trim();
+    }
     if (userId.startsWith('u_')) {
       final suffix = userId.substring(2);
       if (suffix.length >= 4) {
@@ -1246,15 +1310,17 @@ class _StoredAccount {
     required this.phone,
     required this.smsCode,
     required this.userId,
+    required this.displayName,
     required this.role,
     required this.createdAt,
     required this.updatedAt,
     this.lastLoginAt,
   });
 
-  final String phone;
-  final String smsCode;
+  String phone;
+  String smsCode;
   final String userId;
+  String displayName;
   String role;
   final DateTime createdAt;
   DateTime updatedAt;
@@ -1265,6 +1331,7 @@ class _StoredAccount {
       phone: (json['phone'] ?? '').toString(),
       smsCode: (json['sms_code'] ?? '').toString(),
       userId: (json['user_id'] ?? '').toString(),
+      displayName: (json['display_name'] ?? '当前用户').toString(),
       role: (json['role'] ?? 'boss').toString(),
       createdAt: _parseDateTime(json['created_at']) ?? DateTime.now(),
       updatedAt: _parseDateTime(json['updated_at']) ?? DateTime.now(),
@@ -1277,6 +1344,7 @@ class _StoredAccount {
       'phone': phone,
       'sms_code': smsCode,
       'user_id': userId,
+      'display_name': displayName,
       'role': role,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
@@ -1317,6 +1385,7 @@ class _AccountStore {
         phone: '13800000000',
         smsCode: '123456',
         userId: 'u_13800000000',
+        displayName: '风暴小刘',
         role: 'boss',
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
@@ -1343,17 +1412,64 @@ class _AccountStore {
     required String phone,
     required String smsCode,
     required String role,
+    String? displayName,
   }) async {
     final now = DateTime.now();
+    final suffix = phone.length >= 4
+        ? phone.substring(phone.length - 4)
+        : phone;
     final account = _StoredAccount(
       phone: phone,
       smsCode: smsCode,
       userId: 'u_$phone',
+      displayName: (displayName ?? '').trim().isEmpty
+          ? '玩家$suffix'
+          : displayName!.trim(),
       role: role,
       createdAt: now,
       updatedAt: now,
     );
     _accounts[phone] = account;
+    await save();
+    return account;
+  }
+
+  Future<_StoredAccount?> updateProfile({
+    required String userId,
+    required String displayName,
+    required String phone,
+    String? password,
+  }) async {
+    final account = findByUserId(userId);
+    if (account == null) {
+      return null;
+    }
+
+    final newPhone = phone.trim();
+    if (newPhone.isEmpty) {
+      return account;
+    }
+
+    final conflict = findByPhone(newPhone);
+    if (conflict != null && conflict.userId != userId) {
+      throw const FormatException('手机号已被其他账号使用');
+    }
+
+    final oldPhone = account.phone;
+    account.phone = newPhone;
+    account.displayName = displayName.trim().isEmpty
+        ? account.displayName
+        : displayName.trim();
+    if (password != null && password.trim().isNotEmpty) {
+      account.smsCode = password.trim();
+    }
+    account.updatedAt = DateTime.now();
+
+    if (oldPhone != account.phone) {
+      _accounts.remove(oldPhone);
+      _accounts[account.phone] = account;
+    }
+
     await save();
     return account;
   }

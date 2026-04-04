@@ -23,6 +23,30 @@ class AuthSession {
   }
 }
 
+class UserProfile {
+  const UserProfile({
+    required this.userId,
+    required this.displayName,
+    required this.phone,
+  });
+
+  final String userId;
+  final String displayName;
+  final String phone;
+
+  factory UserProfile.fromJson(Map<String, dynamic> json) {
+    return UserProfile(
+      userId: _requiredString(json, 'user_id'),
+      displayName: _requiredString(json, 'display_name'),
+      phone: _requiredString(json, 'phone'),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'user_id': userId, 'display_name': displayName, 'phone': phone};
+  }
+}
+
 class RoomItem {
   const RoomItem({
     required this.id,

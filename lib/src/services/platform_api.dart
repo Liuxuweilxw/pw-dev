@@ -12,11 +12,20 @@ abstract class PlatformApi {
     required String phone,
     required String smsCode,
     required UserRole role,
+    String? displayName,
   });
 
   Future<void> setAuthToken(String token);
 
   Future<void> updateUserRole(UserRole role);
+
+  Future<UserProfile> fetchUserProfile();
+
+  Future<UserProfile> updateUserProfile({
+    required String displayName,
+    required String phone,
+    String? password,
+  });
 
   Future<void> logout();
 
@@ -119,6 +128,9 @@ class MockPlatformApi implements PlatformApi {
   String _mockUserId = 'mock-user';
   UserRole _mockRole = UserRole.boss;
   final Map<String, UserRole> _phoneRoles = {};
+  final Map<String, String> _phoneDisplayNames = {};
+  String _mockPhone = '13800000000';
+  String _mockDisplayName = '风暴小刘';
   final List<RoomItem> _rooms = List<RoomItem>.from(mockRooms);
   final List<OrderItem> _orders = List<OrderItem>.from(mockOrders);
   final List<WalletFlowItem> _walletFlows = List<WalletFlowItem>.from(
@@ -186,6 +198,11 @@ class MockPlatformApi implements PlatformApi {
   }) async {
     _token = 'mock-token-$phone';
     _mockUserId = 'u_$phone';
+    _mockPhone = phone;
+    final suffix = phone.length >= 4
+        ? phone.substring(phone.length - 4)
+        : phone;
+    _mockDisplayName = _phoneDisplayNames[phone] ?? '玩家$suffix';
     _mockRole = _phoneRoles[phone] ?? UserRole.boss;
     return AuthSession(
       accessToken: _token,
@@ -200,8 +217,16 @@ class MockPlatformApi implements PlatformApi {
     required String phone,
     required String smsCode,
     required UserRole role,
+    String? displayName,
   }) async {
     _phoneRoles[phone] = role;
+    final resolvedDisplayName = (displayName ?? '').trim();
+    final suffix = phone.length >= 4
+        ? phone.substring(phone.length - 4)
+        : phone;
+    _phoneDisplayNames[phone] = resolvedDisplayName.isEmpty
+        ? '玩家$suffix'
+        : resolvedDisplayName;
     _mockRole = role;
     return loginWithSms(phone: phone, smsCode: smsCode);
   }
@@ -227,6 +252,52 @@ class MockPlatformApi implements PlatformApi {
         _phoneRoles[phone] = role;
       }
     }
+  }
+
+  @override
+  Future<UserProfile> fetchUserProfile() async {
+    return UserProfile(
+      userId: _mockUserId,
+      displayName: _mockDisplayName,
+      phone: _mockPhone,
+    );
+  }
+
+  @override
+  Future<UserProfile> updateUserProfile({
+    required String displayName,
+    required String phone,
+    String? password,
+  }) async {
+    final normalizedPhone = phone.trim();
+    if (normalizedPhone.isEmpty) {
+      throw Exception('手机号不能为空');
+    }
+
+    final oldPhone = _mockPhone;
+    _mockPhone = normalizedPhone;
+    _mockDisplayName = displayName.trim().isEmpty
+        ? _mockDisplayName
+        : displayName.trim();
+    _phoneDisplayNames[_mockPhone] = _mockDisplayName;
+
+    if (oldPhone != _mockPhone) {
+      final role = _phoneRoles.remove(oldPhone);
+      if (role != null) {
+        _phoneRoles[_mockPhone] = role;
+      }
+    }
+
+    _mockUserId = 'u_$_mockPhone';
+    if (_token.isNotEmpty) {
+      _token = 'mock-token-$_mockPhone';
+    }
+
+    return UserProfile(
+      userId: _mockUserId,
+      displayName: _mockDisplayName,
+      phone: _mockPhone,
+    );
   }
 
   @override

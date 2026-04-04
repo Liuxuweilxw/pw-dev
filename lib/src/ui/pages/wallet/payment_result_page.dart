@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
 
 import '../../../utils/haptic_feedback.dart';
 
@@ -344,21 +343,34 @@ class _PaymentResultPageState extends State<PaymentResultPage>
 }
 
 /// 支付确认对话框
-class PaymentConfirmDialog extends StatelessWidget {
+class PaymentConfirmDialog extends StatefulWidget {
   const PaymentConfirmDialog({
     super.key,
     required this.amount,
-    required this.channel,
+    this.initialChannel = '支付宝',
     this.serviceFee = 0,
   });
 
   final int amount;
-  final String channel;
+  final String initialChannel;
   final int serviceFee;
 
   @override
+  State<PaymentConfirmDialog> createState() => _PaymentConfirmDialogState();
+}
+
+class _PaymentConfirmDialogState extends State<PaymentConfirmDialog> {
+  late String _selectedChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedChannel = widget.initialChannel;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final totalAmount = amount + serviceFee;
+    final totalAmount = widget.amount + widget.serviceFee;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -385,48 +397,17 @@ class PaymentConfirmDialog extends StatelessWidget {
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 24),
-          _buildAmountRow('充值金额', '¥$amount'),
-          if (serviceFee > 0) ...[
+          _buildAmountRow('充值金额', '¥${widget.amount}'),
+          if (widget.serviceFee > 0) ...[
             const SizedBox(height: 8),
-            _buildAmountRow('服务费', '¥$serviceFee'),
+            _buildAmountRow('服务费', '¥${widget.serviceFee}'),
           ],
           const Divider(height: 24),
           _buildAmountRow('实付金额', '¥$totalAmount', isTotal: true),
           const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  channel == '支付宝'
-                      ? Icons.account_balance_wallet
-                      : Icons.wechat,
-                  color: channel == '支付宝'
-                      ? const Color(0xFF1677FF)
-                      : const Color(0xFF07C160),
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  channel,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Spacer(),
-                const Icon(
-                  Icons.check_circle,
-                  color: Color(0xFF34C759),
-                  size: 20,
-                ),
-              ],
-            ),
-          ),
+          _buildChannelOption('支付宝', Icons.account_balance_wallet),
+          const SizedBox(height: 8),
+          _buildChannelOption('微信支付', Icons.wechat),
         ],
       ),
       actions: [
@@ -436,7 +417,7 @@ class PaymentConfirmDialog extends StatelessWidget {
               child: OutlinedButton(
                 onPressed: () {
                   HapticFeedbackUtil.lightImpact();
-                  Navigator.of(context).pop(false);
+                  Navigator.of(context).pop();
                 },
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -449,7 +430,7 @@ class PaymentConfirmDialog extends StatelessWidget {
               child: FilledButton(
                 onPressed: () {
                   HapticFeedbackUtil.mediumImpact();
-                  Navigator.of(context).pop(true);
+                  Navigator.of(context).pop(_selectedChannel);
                 },
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -460,6 +441,55 @@ class PaymentConfirmDialog extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildChannelOption(String channel, IconData icon) {
+    final isSelected = _selectedChannel == channel;
+    return InkWell(
+      onTap: () {
+        HapticFeedbackUtil.selectionClick();
+        setState(() {
+          _selectedChannel = channel;
+        });
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF3B82F6) : Colors.transparent,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: channel == '支付宝'
+                  ? const Color(0xFF1677FF)
+                  : const Color(0xFF07C160),
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              channel,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+            const Spacer(),
+            Icon(
+              isSelected
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: isSelected
+                  ? const Color(0xFF34C759)
+                  : const Color(0xFF9CA3AF),
+              size: 20,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

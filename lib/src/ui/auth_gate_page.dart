@@ -21,25 +21,47 @@ class _AuthGatePageState extends State<AuthGatePage> {
   _AuthMode mode = _AuthMode.login;
   UserRole registerRole = UserRole.boss;
   final TextEditingController usernameController = TextEditingController();
+  final TextEditingController registerDisplayNameController =
+      TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool submitting = false;
   String? error;
   bool authenticated = false;
   UserRole authenticatedRole = UserRole.boss;
 
+  Future<void> _handleLogout() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      authenticated = false;
+      mode = _AuthMode.login;
+      passwordController.clear();
+      error = null;
+      submitting = false;
+    });
+  }
+
   @override
   void dispose() {
     usernameController.dispose();
+    registerDisplayNameController.dispose();
     passwordController.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    final username = usernameController.text.trim();
+    final phone = usernameController.text.trim();
     final password = passwordController.text.trim();
+    final registerDisplayName = registerDisplayNameController.text.trim();
 
-    if (username.isEmpty || password.isEmpty) {
-      setState(() => error = '用户名和密码不能为空');
+    if (phone.isEmpty || password.isEmpty) {
+      setState(() => error = '手机号和密码不能为空');
+      return;
+    }
+
+    if (mode == _AuthMode.register && registerDisplayName.isEmpty) {
+      setState(() => error = '注册时请填写用户名称');
       return;
     }
 
@@ -50,11 +72,12 @@ class _AuthGatePageState extends State<AuthGatePage> {
 
     try {
       final session = mode == _AuthMode.login
-          ? await widget.api.loginWithSms(phone: username, smsCode: password)
+          ? await widget.api.loginWithSms(phone: phone, smsCode: password)
           : await widget.api.registerWithSms(
-              phone: username,
+              phone: phone,
               smsCode: password,
               role: registerRole,
+              displayName: registerDisplayName,
             );
 
       await widget.api.setAuthToken(session.accessToken);
@@ -82,7 +105,11 @@ class _AuthGatePageState extends State<AuthGatePage> {
   @override
   Widget build(BuildContext context) {
     if (authenticated) {
-      return PlatformShell(api: widget.api, initialRole: authenticatedRole);
+      return PlatformShell(
+        api: widget.api,
+        initialRole: authenticatedRole,
+        onLogout: _handleLogout,
+      );
     }
 
     final colorScheme = Theme.of(context).colorScheme;
@@ -219,9 +246,26 @@ class _AuthGatePageState extends State<AuthGatePage> {
                                       },
                                     ),
                                     const SizedBox(height: 16),
+                                    const Text(
+                                      '用户名称',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextField(
+                                      controller: registerDisplayNameController,
+                                      decoration: const InputDecoration(
+                                        hintText: '请输入用户名称（展示用）',
+                                        prefixIcon: Icon(Icons.badge_rounded),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
                                   ],
                                   const Text(
-                                    '用户名',
+                                    '手机号',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
@@ -232,9 +276,12 @@ class _AuthGatePageState extends State<AuthGatePage> {
                                   TextField(
                                     controller: usernameController,
                                     decoration: const InputDecoration(
-                                      hintText: '请输入用户名',
-                                      prefixIcon: Icon(Icons.person_rounded),
+                                      hintText: '请输入手机号',
+                                      prefixIcon: Icon(
+                                        Icons.phone_iphone_rounded,
+                                      ),
                                     ),
+                                    keyboardType: TextInputType.phone,
                                   ),
                                   const SizedBox(height: 16),
                                   const Text(

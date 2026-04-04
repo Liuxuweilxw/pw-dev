@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../models/app_models.dart';
 import '../../../models/business_models.dart';
 import '../../../services/platform_api.dart';
 import '../../../utils/haptic_feedback.dart';
@@ -20,9 +21,10 @@ class WalletPage extends StatefulWidget {
 class _WalletPageState extends State<WalletPage> {
   UserBalance? _balance;
   List<PointRecord> _pointRecords = const [];
+  List<WalletFlowItem> _walletFlows = const [];
   bool _isLoading = true;
+  bool _isRefreshing = false;
   String? _error;
-  String _selectedChannel = '支付宝';
 
   @override
   void initState() {
@@ -30,33 +32,58 @@ class _WalletPageState extends State<WalletPage> {
     _loadBalance();
   }
 
-  Future<void> _loadBalance() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadBalance({
+    bool showLoading = true,
+    bool showSuccessHint = false,
+  }) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    } else {
+      setState(() {
+        _isRefreshing = true;
+      });
+    }
 
     try {
       final results = await Future.wait<dynamic>([
         widget.api.fetchUserBalance(),
         widget.api.fetchPointRecords().catchError((_) => <PointRecord>[]),
+        widget.api.fetchWalletFlows().catchError((_) => <WalletFlowItem>[]),
       ]);
 
       final balance = results[0] as UserBalance;
       final records = results[1] as List<PointRecord>;
+      final walletFlows = results[2] as List<WalletFlowItem>;
       if (mounted) {
         setState(() {
           _balance = balance;
           _pointRecords = records;
+          _walletFlows = walletFlows;
+          _error = null;
           _isLoading = false;
+          _isRefreshing = false;
         });
+        if (!showLoading && showSuccessHint) {
+          _showSnackBar('已更新');
+        }
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isLoading = false;
-        });
+        if (showLoading) {
+          setState(() {
+            _error = e.toString();
+            _isLoading = false;
+            _isRefreshing = false;
+          });
+        } else {
+          setState(() {
+            _isRefreshing = false;
+          });
+          _showSnackBar('刷新失败：$e');
+        }
       }
     }
   }
@@ -77,14 +104,13 @@ class _WalletPageState extends State<WalletPage> {
   Future<void> _handleRecharge(int amount) async {
     HapticFeedbackUtil.mediumImpact();
 
-    // 显示支付确认对话框
-    final confirmed = await showDialog<bool>(
+    final channel = await showDialog<String>(
       context: context,
       builder: (_) =>
-          PaymentConfirmDialog(amount: amount, channel: _selectedChannel),
+          PaymentConfirmDialog(amount: amount, initialChannel: '支付宝'),
     );
 
-    if (confirmed != true) return;
+    if (channel == null) return;
 
     // 显示加载状态
     showDialog(
@@ -94,7 +120,7 @@ class _WalletPageState extends State<WalletPage> {
     );
 
     try {
-      await widget.api.recharge(amount: amount, channel: _selectedChannel);
+      await widget.api.recharge(amount: amount, channel: channel);
       await _loadBalance();
 
       if (mounted) {
@@ -290,8 +316,16 @@ class _WalletPageState extends State<WalletPage> {
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _loadBalance,
+            icon: _isRefreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            onPressed: _isRefreshing
+                ? null
+                : () => _loadBalance(showLoading: false, showSuccessHint: true),
             tooltip: '刷新',
           ),
         ],
@@ -356,19 +390,24 @@ class _WalletPageState extends State<WalletPage> {
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _balance?.levelName ?? 'Lv1',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+              OutlinedButton.icon(
+                onPressed: _openRechargeRecordsPage,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
                   ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  backgroundColor: Colors.white.withOpacity(0.14),
+                ),
+                icon: const Icon(Icons.receipt_long_rounded, size: 16),
+                label: const Text(
+                  '充值记录',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
@@ -441,16 +480,11 @@ class _WalletPageState extends State<WalletPage> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 16),
-
-          // 支付渠道选择
-          Row(
-            children: [
-              _buildChannelChip('支付宝', Icons.account_balance_wallet),
-              const SizedBox(width: 12),
-              _buildChannelChip('微信支付', Icons.wechat),
-            ],
+          const Text(
+            '支付方式将在支付弹窗中选择',
+            style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
           // 金额选择
           Wrap(
@@ -466,38 +500,10 @@ class _WalletPageState extends State<WalletPage> {
     );
   }
 
-  Widget _buildChannelChip(String label, IconData icon) {
-    final isSelected = _selectedChannel == label;
-
-    return GestureDetector(
-      onTap: () {
-        HapticFeedbackUtil.selectionClick();
-        setState(() => _selectedChannel = label);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF0071E3) : const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: isSelected ? Colors.white : const Color(0xFF6B7280),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? Colors.white : const Color(0xFF374151),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
+  Future<void> _openRechargeRecordsPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _RechargeRecordsPage(records: _walletFlows),
       ),
     );
   }
@@ -812,5 +818,304 @@ class _ErrorView extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _RechargeRecordsPage extends StatefulWidget {
+  const _RechargeRecordsPage({required this.records});
+
+  final List<WalletFlowItem> records;
+
+  @override
+  State<_RechargeRecordsPage> createState() => _RechargeRecordsPageState();
+}
+
+class _RechargeRecordsPageState extends State<_RechargeRecordsPage> {
+  late DateTimeRange _selectedRange;
+  late final TextEditingController _startDateController;
+  late final TextEditingController _endDateController;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _selectedRange = DateTimeRange(
+      start: DateTime(now.year - 1, now.month, now.day),
+      end: now,
+    );
+    _startDateController = TextEditingController(
+      text: _formatDateCompact(_selectedRange.start),
+    );
+    _endDateController = TextEditingController(
+      text: _formatDateCompact(_selectedRange.end),
+    );
+  }
+
+  @override
+  void dispose() {
+    _startDateController.dispose();
+    _endDateController.dispose();
+    super.dispose();
+  }
+
+  List<WalletFlowItem> get _filteredRechargeRecords {
+    final start = DateTime(
+      _selectedRange.start.year,
+      _selectedRange.start.month,
+      _selectedRange.start.day,
+    );
+    final endExclusive = DateTime(
+      _selectedRange.end.year,
+      _selectedRange.end.month,
+      _selectedRange.end.day,
+    ).add(const Duration(days: 1));
+
+    return widget.records.where((flow) {
+      if (!flow.type.contains('充值')) {
+        return false;
+      }
+      final flowTime = _parseFlowTime(flow.time);
+      if (flowTime == null) {
+        return false;
+      }
+      return !flowTime.isBefore(start) && flowTime.isBefore(endExclusive);
+    }).toList();
+  }
+
+  void _applyInputRange() {
+    final start = _parseInputDate(_startDateController.text);
+    final end = _parseInputDate(_endDateController.text);
+
+    if (start == null || end == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('日期格式错误，请输入 YYYYMMDD 或 YYYY-MM-DD')),
+      );
+      return;
+    }
+    if (start.isAfter(end)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('开始日期不能晚于结束日期')));
+      return;
+    }
+
+    setState(() {
+      _selectedRange = DateTimeRange(start: start, end: end);
+    });
+  }
+
+  DateTime? _parseInputDate(String input) {
+    final normalized = input.trim().replaceAll('-', '');
+    if (normalized.length != 8) {
+      return null;
+    }
+    final year = int.tryParse(normalized.substring(0, 4));
+    final month = int.tryParse(normalized.substring(4, 6));
+    final day = int.tryParse(normalized.substring(6, 8));
+    if (year == null || month == null || day == null) {
+      return null;
+    }
+    final date = DateTime(year, month, day);
+    if (date.year != year || date.month != month || date.day != day) {
+      return null;
+    }
+    return date;
+  }
+
+  DateTime? _parseFlowTime(String input) {
+    final trimmed = input.trim();
+    final full = DateTime.tryParse(trimmed);
+    if (full != null) {
+      return full;
+    }
+
+    final match = RegExp(
+      r'^(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$',
+    ).firstMatch(trimmed);
+    if (match == null) {
+      return null;
+    }
+
+    final month = int.tryParse(match.group(1)!);
+    final day = int.tryParse(match.group(2)!);
+    final hour = int.tryParse(match.group(3)!);
+    final minute = int.tryParse(match.group(4)!);
+    if (month == null || day == null || hour == null || minute == null) {
+      return null;
+    }
+    final now = DateTime.now();
+    final currentYear = now.year;
+    final thisYear = DateTime(currentYear, month, day, hour, minute);
+    if (thisYear.isAfter(now)) {
+      return DateTime(currentYear - 1, month, day, hour, minute);
+    }
+    return thisYear;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final records = _filteredRechargeRecords;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('充值记录'), centerTitle: true),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFEAEAF0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.date_range_rounded, color: Color(0xFF6B7280)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _startDateController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      hintText: '开始日期',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _endDateController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      hintText: '结束日期',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _applyInputRange,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(56, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  child: const Text('应用'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (records.isEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFEAEAF0)),
+              ),
+              child: const Column(
+                children: [
+                  Icon(
+                    Icons.receipt_long_rounded,
+                    size: 40,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                  SizedBox(height: 8),
+                  Text('该时间范围暂无充值记录'),
+                ],
+              ),
+            )
+          else
+            ...records.map((flow) {
+              final isSuccess = flow.status == '成功';
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFEAEAF0)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.add_card_rounded,
+                        color: Color(0xFF16A34A),
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            flow.type,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            flow.time,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF6B7280),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          flow.amount,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF16A34A),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          flow.status,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isSuccess
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFF59E0B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  String _formatDateCompact(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
   }
 }

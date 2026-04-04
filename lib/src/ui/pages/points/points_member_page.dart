@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 
 import '../../../models/business_models.dart';
 import '../../../services/platform_api.dart';
@@ -83,48 +84,78 @@ class PointsMemberPage extends StatefulWidget {
   State<PointsMemberPage> createState() => _PointsMemberPageState();
 }
 
-class _PointsMemberPageState extends State<PointsMemberPage>
-    with SingleTickerProviderStateMixin {
+class _PointsMemberPageState extends State<PointsMemberPage> {
   bool _isLoading = true;
+  bool _isRefreshing = false;
+  String? _error;
   UserBalance? _balance;
-  List<PointRecord> _records = [];
-  late TabController _tabController;
+  List<PointRecord> _records = const [];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _loadData();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+  Future<void> _loadData({
+    bool showLoading = true,
+    bool showSuccessHint = false,
+  }) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    } else {
+      setState(() {
+        _isRefreshing = true;
+      });
+    }
 
-  Future<void> _loadData() async {
     try {
-      final results = await Future.wait([
+      final results = await Future.wait<dynamic>([
         widget.api.fetchUserBalance(),
         widget.api.fetchPointRecords(),
       ]);
 
-      if (mounted) {
-        setState(() {
-          _balance = results[0] as UserBalance;
-          _records = results[1] as List<PointRecord>;
-          _isLoading = false;
-        });
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _balance = results[0] as UserBalance;
+        _records = results[1] as List<PointRecord>;
+        _error = null;
+        _isLoading = false;
+        _isRefreshing = false;
+      });
+      if (!showLoading && showSuccessHint) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('已更新'),
+              duration: Duration(milliseconds: 900),
+            ),
+          );
       }
     } catch (e) {
-      if (mounted) {
+      if (!mounted) {
+        return;
+      }
+      if (showLoading) {
         setState(() {
+          _error = e.toString();
           _isLoading = false;
+          _isRefreshing = false;
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('加载失败: $e')));
+      } else {
+        setState(() {
+          _isRefreshing = false;
+        });
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text('刷新失败：$e')));
       }
     }
   }
@@ -139,7 +170,9 @@ class _PointsMemberPageState extends State<PointsMemberPage>
 
   LevelBenefit? get _nextLevelBenefit {
     final level = _balance?.level ?? 1;
-    if (level >= levelBenefits.length) return null;
+    if (level >= levelBenefits.length) {
+      return null;
+    }
     return levelBenefits.firstWhere(
       (b) => b.level == level + 1,
       orElse: () => levelBenefits.last,
@@ -148,420 +181,678 @@ class _PointsMemberPageState extends State<PointsMemberPage>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : CustomScrollView(
-              slivers: [
-                // 顶部渐变AppBar
-                SliverAppBar(
-                  expandedHeight: 280,
-                  pinned: true,
-                  flexibleSpace: FlexibleSpaceBar(
-                    background: _buildHeaderBackground(theme),
-                  ),
-                  title: const Text('会员中心'),
-                ),
-                // TabBar
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _StickyTabBarDelegate(
-                    TabBar(
-                      controller: _tabController,
-                      tabs: const [
-                        Tab(text: '等级权益'),
-                        Tab(text: '积分明细'),
-                      ],
-                    ),
-                  ),
-                ),
-                // Tab内容
-                SliverFillRemaining(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildBenefitsTab(theme),
-                      _buildRecordsTab(theme),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+      appBar: AppBar(
+        title: const Text('积分会员'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: _isRefreshing
+                ? null
+                : () => _loadData(showLoading: false, showSuccessHint: true),
+            icon: _isRefreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            tooltip: '刷新',
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? _ErrorView(error: _error!, onRetry: _loadData)
+            : _buildContent(),
+      ),
     );
   }
 
-  Widget _buildHeaderBackground(ThemeData theme) {
+  Widget _buildContent() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildLevelHeroCard(),
+        const SizedBox(height: 20),
+        _buildProgressCard(),
+        const SizedBox(height: 20),
+        _buildSectionTitle('等级权益'),
+        const SizedBox(height: 10),
+        _buildBenefitsHorizontalList(),
+      ],
+    );
+  }
+
+  Widget _buildBenefitsHorizontalList() {
+    return SizedBox(
+      height: 300,
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.trackpad,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.unknown,
+          },
+        ),
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: levelBenefits.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, index) {
+            final benefit = levelBenefits[index];
+            return SizedBox(width: 320, child: _buildBenefitCard(benefit));
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLevelHeroCard() {
     final levelBenefit = _currentLevelBenefit;
     final nextLevel = _nextLevelBenefit;
 
     return Container(
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            levelBenefit.color.withAlpha(230),
-            levelBenefit.color.withAlpha(180),
-            theme.primaryColor.withAlpha(150),
-          ],
+          colors: [Color(0xFF0071E3), Color(0xFF00C7BE)],
         ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0071E3).withAlpha(51),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 60, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              // 等级图标和名称
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withAlpha(51),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      levelBenefit.icon,
-                      size: 40,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Lv.${levelBenefit.level} ${levelBenefit.name}',
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '当前积分: ${_balance?.points ?? 0}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.white.withAlpha(204),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(46),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(levelBenefit.icon, size: 32, color: Colors.white),
               ),
-              const SizedBox(height: 24),
-              // 升级进度
-              if (nextLevel != null) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '距离 Lv.${nextLevel.level} ${nextLevel.name}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withAlpha(204),
+                      'Lv.${levelBenefit.level} ${levelBenefit.name}',
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     Text(
-                      '${_balance?.points ?? 0}/${nextLevel.requiredPoints}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                      '当前积分：${_balance?.points ?? 0}',
+                      style: TextStyle(
+                        color: Colors.white.withAlpha(220),
+                        fontSize: 14,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: _balance?.levelProgress ?? 0,
-                    backgroundColor: Colors.white.withAlpha(51),
-                    valueColor: const AlwaysStoppedAnimation(Colors.white),
-                    minHeight: 8,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '还需 ${nextLevel.requiredPoints - (_balance?.points ?? 0)} 积分升级',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white.withAlpha(179),
-                  ),
-                ),
-              ] else
-                Text(
-                  '🎉 已达最高等级',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.white.withAlpha(230),
-                  ),
-                ),
+              ),
             ],
           ),
-        ),
+          const SizedBox(height: 18),
+          if (nextLevel != null)
+            Text(
+              '距离 Lv.${nextLevel.level} ${nextLevel.name} 还需 ${_remainingToNextLevel(nextLevel)} 积分',
+              style: TextStyle(
+                color: Colors.white.withAlpha(220),
+                fontSize: 13,
+              ),
+            )
+          else
+            Text(
+              '🎉 已达最高等级',
+              style: TextStyle(
+                color: Colors.white.withAlpha(220),
+                fontSize: 13,
+              ),
+            ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.bottomRight,
+            child: TextButton.icon(
+              onPressed: _openRecordsPage,
+              icon: const Icon(
+                Icons.receipt_long_rounded,
+                size: 16,
+                color: Colors.white,
+              ),
+              label: const Text('积分明细', style: TextStyle(color: Colors.white)),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: Colors.white.withAlpha(28),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildBenefitsTab(ThemeData theme) {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: levelBenefits.length,
-      itemBuilder: (context, index) {
-        final benefit = levelBenefits[index];
-        final isCurrentLevel = benefit.level == (_balance?.level ?? 1);
-        final isUnlocked = benefit.level <= (_balance?.level ?? 1);
+  Future<void> _openRecordsPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _PointRecordsPage(records: _records),
+      ),
+    );
+  }
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: isCurrentLevel
-                ? Border.all(color: benefit.color, width: 2)
-                : null,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(13),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+  Widget _buildProgressCard() {
+    final nextLevel = _nextLevelBenefit;
+
+    return _surfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '升级进度',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+          if (nextLevel == null)
+            const Text('您已达到最高会员等级')
+          else ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Lv.${_currentLevelBenefit.level} → Lv.${nextLevel.level}',
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  '${_balance?.points ?? 0}/${nextLevel.requiredPoints}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: (_balance?.levelProgress ?? 0).clamp(0.0, 1.0),
+                minHeight: 8,
+                backgroundColor: const Color(0xFFE5E7EB),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBenefitCard(LevelBenefit benefit) {
+    final isCurrentLevel = benefit.level == (_balance?.level ?? 1);
+    final isUnlocked = benefit.level <= (_balance?.level ?? 1);
+
+    return _surfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isUnlocked
+                      ? benefit.color.withAlpha(38)
+                      : const Color(0xFFF3F4F6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  benefit.icon,
+                  color: isUnlocked ? benefit.color : const Color(0xFF9CA3AF),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Lv.${benefit.level} ${benefit.name}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: isUnlocked
+                                ? const Color(0xFF111827)
+                                : const Color(0xFF9CA3AF),
+                          ),
+                        ),
+                        if (isCurrentLevel)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0071E3),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              '当前',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '需要 ${benefit.requiredPoints} 积分',
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          child: Column(
-            children: [
-              // 等级头部
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: isUnlocked
-                      ? benefit.color.withAlpha(26)
-                      : Colors.grey.shade50,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(14),
+          const SizedBox(height: 12),
+          ...benefit.benefits.map(
+            (item) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    isUnlocked
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    size: 18,
+                    color: isUnlocked
+                        ? const Color(0xFF16A34A)
+                        : const Color(0xFF9CA3AF),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: TextStyle(
+                        color: isUnlocked
+                            ? const Color(0xFF111827)
+                            : const Color(0xFF9CA3AF),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.2,
+      ),
+    );
+  }
+
+  Widget _surfaceCard({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFEAEAF0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(10),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  int _remainingToNextLevel(LevelBenefit nextLevel) {
+    final current = _balance?.points ?? 0;
+    final remaining = nextLevel.requiredPoints - current;
+    return remaining < 0 ? 0 : remaining;
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({required this.error, required this.onRetry});
+
+  final String error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded, size: 44),
+            const SizedBox(height: 12),
+            const Text('积分信息加载失败'),
+            const SizedBox(height: 8),
+            Text(
+              error,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF6B7280)),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PointRecordsPage extends StatefulWidget {
+  const _PointRecordsPage({required this.records});
+
+  final List<PointRecord> records;
+
+  @override
+  State<_PointRecordsPage> createState() => _PointRecordsPageState();
+}
+
+class _PointRecordsPageState extends State<_PointRecordsPage> {
+  late DateTimeRange _selectedRange;
+  late final TextEditingController _startDateController;
+  late final TextEditingController _endDateController;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _selectedRange = DateTimeRange(
+      start: DateTime(now.year - 1, now.month, now.day),
+      end: now,
+    );
+    _startDateController = TextEditingController(
+      text: _formatDateCompact(_selectedRange.start),
+    );
+    _endDateController = TextEditingController(
+      text: _formatDateCompact(_selectedRange.end),
+    );
+  }
+
+  @override
+  void dispose() {
+    _startDateController.dispose();
+    _endDateController.dispose();
+    super.dispose();
+  }
+
+  List<PointRecord> get _filteredRecords {
+    final start = DateTime(
+      _selectedRange.start.year,
+      _selectedRange.start.month,
+      _selectedRange.start.day,
+    );
+    final endExclusive = DateTime(
+      _selectedRange.end.year,
+      _selectedRange.end.month,
+      _selectedRange.end.day,
+    ).add(const Duration(days: 1));
+
+    return widget.records.where((record) {
+      return !record.createdAt.isBefore(start) &&
+          record.createdAt.isBefore(endExclusive);
+    }).toList();
+  }
+
+  void _applyInputRange() {
+    final start = _parseInputDate(_startDateController.text);
+    final end = _parseInputDate(_endDateController.text);
+
+    if (start == null || end == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('日期格式错误，请输入 YYYYMMDD 或 YYYY-MM-DD')),
+      );
+      return;
+    }
+    if (start.isAfter(end)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('开始日期不能晚于结束日期')));
+      return;
+    }
+
+    setState(() {
+      _selectedRange = DateTimeRange(start: start, end: end);
+    });
+  }
+
+  DateTime? _parseInputDate(String input) {
+    final normalized = input.trim().replaceAll('-', '');
+    if (normalized.length != 8) {
+      return null;
+    }
+    final year = int.tryParse(normalized.substring(0, 4));
+    final month = int.tryParse(normalized.substring(4, 6));
+    final day = int.tryParse(normalized.substring(6, 8));
+    if (year == null || month == null || day == null) {
+      return null;
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      return null;
+    }
+
+    final date = DateTime(year, month, day);
+    if (date.year != year || date.month != month || date.day != day) {
+      return null;
+    }
+    return date;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final records = _filteredRecords;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('积分明细'), centerTitle: true),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFEAEAF0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.date_range_rounded, color: Color(0xFF6B7280)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _startDateController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      hintText: '开始日期',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _endDateController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      hintText: '结束日期',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _applyInputRange,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(56, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  child: const Text('应用'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (records.isEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFEAEAF0)),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.stars_rounded, size: 40, color: Color(0xFF9CA3AF)),
+                  SizedBox(height: 8),
+                  Text('该时间范围暂无积分记录'),
+                ],
+              ),
+            )
+          else
+            ...records.map((record) {
+              final isPositive = record.points > 0;
+              final accent = isPositive
+                  ? const Color(0xFF16A34A)
+                  : const Color(0xFFD97706);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFEAEAF0)),
                 ),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      width: 34,
+                      height: 34,
                       decoration: BoxDecoration(
-                        color: isUnlocked
-                            ? benefit.color
-                            : Colors.grey.shade400,
-                        shape: BoxShape.circle,
+                        color: accent.withAlpha(24),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(benefit.icon, size: 24, color: Colors.white),
+                      child: Icon(
+                        isPositive
+                            ? Icons.add_circle_outline_rounded
+                            : Icons.remove_circle_outline_rounded,
+                        color: accent,
+                        size: 20,
+                      ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Lv.${benefit.level} ${benefit.name}',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: isUnlocked
-                                      ? benefit.color
-                                      : Colors.grey.shade500,
-                                ),
-                              ),
-                              if (isCurrentLevel) ...[
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: benefit.color,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Text(
-                                    '当前',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
+                          Text(
+                            record.reasonText,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '需要 ${benefit.requiredPoints} 积分',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey.shade600,
+                            _formatDateTime(record.createdAt),
+                            style: const TextStyle(
+                              color: Color(0xFF6B7280),
+                              fontSize: 12,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    if (!isUnlocked)
-                      Icon(
-                        Icons.lock_outline_rounded,
-                        color: Colors.grey.shade400,
+                    Text(
+                      '${isPositive ? '+' : ''}${record.points}',
+                      style: TextStyle(
+                        color: accent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
                       ),
+                    ),
                   ],
                 ),
-              ),
-              // 权益列表
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: benefit.benefits.map((b) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          Icon(
-                            isUnlocked
-                                ? Icons.check_circle_rounded
-                                : Icons.circle_outlined,
-                            size: 18,
-                            color: isUnlocked
-                                ? Colors.green.shade500
-                                : Colors.grey.shade400,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              b,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isUnlocked
-                                    ? Colors.black87
-                                    : Colors.grey.shade500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+              );
+            }),
+        ],
+      ),
     );
   }
 
-  Widget _buildRecordsTab(ThemeData theme) {
-    if (_records.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.stars_rounded, size: 64, color: Colors.grey.shade400),
-            const SizedBox(height: 16),
-            Text(
-              '暂无积分记录',
-              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '完成订单即可获得积分',
-              style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _records.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final record = _records[index];
-        final isPositive = record.points > 0;
-
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          leading: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isPositive ? Colors.green.shade50 : Colors.orange.shade50,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              isPositive
-                  ? Icons.add_circle_outline_rounded
-                  : Icons.remove_circle_outline_rounded,
-              color: isPositive
-                  ? Colors.green.shade600
-                  : Colors.orange.shade600,
-            ),
-          ),
-          title: Text(
-            record.reasonText,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-          ),
-          subtitle: Text(
-            _formatDate(record.createdAt),
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-          ),
-          trailing: Text(
-            '${isPositive ? '+' : ''}${record.points}',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: isPositive
-                  ? Colors.green.shade600
-                  : Colors.orange.shade600,
-            ),
-          ),
-        );
-      },
-    );
+  String _formatDateCompact(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-  }
-}
-
-/// 粘性TabBar委托
-class _StickyTabBarDelegate extends SliverPersistentHeaderDelegate {
-  _StickyTabBarDelegate(this.tabBar);
-
-  final TabBar tabBar;
-
-  @override
-  double get minExtent => tabBar.preferredSize.height;
-
-  @override
-  double get maxExtent => tabBar.preferredSize.height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: tabBar,
-    );
-  }
-
-  @override
-  bool shouldRebuild(_StickyTabBarDelegate oldDelegate) {
-    return tabBar != oldDelegate.tabBar;
+  String _formatDateTime(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
+        '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 }

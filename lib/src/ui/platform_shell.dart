@@ -12,15 +12,19 @@ import 'pages/wallet/wallet_page.dart';
 import 'pages/report/report_form_page.dart';
 import 'pages/points/points_member_page.dart';
 
+enum _ProfileEditType { displayName, phone, password }
+
 class PlatformShell extends StatefulWidget {
   const PlatformShell({
     super.key,
     required this.api,
     this.initialRole = UserRole.boss,
+    this.onLogout,
   });
 
   final PlatformApi api;
   final UserRole initialRole;
+  final Future<void> Function()? onLogout;
 
   @override
   State<PlatformShell> createState() => _PlatformShellState();
@@ -35,7 +39,6 @@ class _PlatformShellState extends State<PlatformShell> {
   bool isLoading = true;
   String? loadError;
 
-  // 高级筛选参数
   RangeValues priceRange = const RangeValues(0, 1000);
   int? minSeats;
   List<String> selectedTags = [];
@@ -47,8 +50,25 @@ class _PlatformShellState extends State<PlatformShell> {
   List<WalletFlowItem> walletFlows = const [];
   List<OrderItem> orders = const [];
   UserBalance? userBalance;
+  UserProfile? userProfile;
   final Map<String, List<String>> roomChats = {};
   Timer? companionRefreshTimer;
+
+  String get profileDisplayName {
+    final value = userProfile?.displayName.trim() ?? '';
+    if (value.isNotEmpty) {
+      return value;
+    }
+    return '风暴小刘';
+  }
+
+  String get profilePhone {
+    final value = userProfile?.phone.trim() ?? '';
+    if (value.isNotEmpty) {
+      return value;
+    }
+    return '未绑定手机号';
+  }
 
   bool get isVerified => verification.isVerified;
 
@@ -70,12 +90,38 @@ class _PlatformShellState extends State<PlatformShell> {
       return '已完成实名认证，可创建房间与使用资金功能';
     }
     if (verification.isPending) {
-      return '实名认证审核中，审核通过后将自动解锁资金交易与创建房间';
+      return '实名认证审核中，审核通过后将自动解锁创建房间与资金交易';
     }
     if (verification.isRejected) {
       return '实名认证未通过，请重新提交资料后再创建房间';
     }
     return '手机号登录，实名认证后解锁资金交易与创建房间';
+  }
+
+  String get verificationStatusTag {
+    if (verification.isVerified) {
+      return '实名认证已完成';
+    }
+    if (verification.isPending) {
+      return '实名认证审核中';
+    }
+    if (verification.isRejected) {
+      return '实名认证未通过';
+    }
+    return '未完成实名认证';
+  }
+
+  Color get verificationStatusColor {
+    if (verification.isVerified) {
+      return const Color(0xFF16A34A);
+    }
+    if (verification.isPending) {
+      return const Color(0xFFD97706);
+    }
+    if (verification.isRejected) {
+      return const Color(0xFFDC2626);
+    }
+    return const Color(0xFFEF4444);
   }
 
   String get walletBalanceLabel {
@@ -122,11 +168,13 @@ class _PlatformShellState extends State<PlatformShell> {
     });
   }
 
-  Future<void> _loadDashboard() async {
-    setState(() {
-      isLoading = true;
-      loadError = null;
-    });
+  Future<bool> _loadDashboard({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        isLoading = true;
+        loadError = null;
+      });
+    }
     try {
       final result = await Future.wait<dynamic>([
         widget.api.fetchRooms(
@@ -145,9 +193,13 @@ class _PlatformShellState extends State<PlatformShell> {
             .fetchUserBalance()
             .then<UserBalance?>((value) => value)
             .catchError((_) => null),
+        widget.api
+            .fetchUserProfile()
+            .then<UserProfile?>((value) => value)
+            .catchError((_) => null),
       ]);
       if (!mounted) {
-        return;
+        return false;
       }
       setState(() {
         rooms = result[0] as List<RoomItem>;
@@ -157,20 +209,28 @@ class _PlatformShellState extends State<PlatformShell> {
         orders = result[4] as List<OrderItem>;
         verification = result[5] as IdentityVerification;
         userBalance = result[6] as UserBalance?;
+        userProfile = result[7] as UserProfile?;
+        loadError = null;
         isLoading = false;
       });
+      return true;
     } catch (e) {
       if (!mounted) {
-        return;
+        return false;
       }
-      setState(() {
-        loadError = e.toString();
-        isLoading = false;
-      });
+      if (showLoading) {
+        setState(() {
+          loadError = e.toString();
+          isLoading = false;
+        });
+      } else {
+        _showSnackBar('刷新失败：$e');
+      }
+      return false;
     }
   }
 
-  Future<void> _loadRooms() async {
+  Future<bool> _loadRooms({bool showFailureHint = true}) async {
     try {
       final roomFuture = widget.api.fetchRooms(
         role: role,
@@ -187,15 +247,19 @@ class _PlatformShellState extends State<PlatformShell> {
         companionsFuture,
       ]);
       if (!mounted) {
-        return;
+        return false;
       }
       setState(() {
         rooms = result[0] as List<RoomItem>;
         joinedRooms = result[1] as List<RoomItem>;
         companions = result[2] as List<CompanionItem>;
       });
+      return true;
     } catch (e) {
-      _showSnackBar('刷新房间失败：$e');
+      if (showFailureHint) {
+        _showSnackBar('刷新房间失败：$e');
+      }
+      return false;
     }
   }
 
@@ -216,10 +280,16 @@ class _PlatformShellState extends State<PlatformShell> {
 
   Future<void> _refreshCurrentPage() async {
     if (navIndex == 0 || (role == UserRole.boss && navIndex == 1)) {
-      await _loadRooms();
+      final success = await _loadRooms();
+      if (success && mounted) {
+        _showSnackBar('已更新');
+      }
       return;
     }
-    await _loadDashboard();
+    final success = await _loadDashboard(showLoading: false);
+    if (success && mounted) {
+      _showSnackBar('已更新');
+    }
   }
 
   /// 检查是否有启用的高级筛选
@@ -589,6 +659,7 @@ class _PlatformShellState extends State<PlatformShell> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
+      extendBody: true,
       appBar: AppBar(
         backgroundColor: Colors.white.withValues(alpha: 0.92),
         surfaceTintColor: Colors.transparent,
@@ -689,54 +760,59 @@ class _PlatformShellState extends State<PlatformShell> {
       ),
       bottomNavigationBar: isWide
           ? null
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: const Color(0xFFEAEAF0)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 24,
-                      offset: const Offset(0, 10),
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.95),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: const Color(0xFFEAEAF0).withValues(alpha: 0.9),
                     ),
-                  ],
-                ),
-                child: NavigationBar(
-                  selectedIndex: selectedNavIndex,
-                  onDestinationSelected: (index) {
-                    HapticFeedbackUtil.selectionClick();
-                    setState(() => navIndex = index);
-                    if (showCompanionTab && index == 1) {
-                      _loadRooms();
-                    }
-                  },
-                  backgroundColor: Colors.transparent,
-                  destinations: [
-                    const NavigationDestination(
-                      icon: Icon(Icons.meeting_room_outlined),
-                      selectedIcon: Icon(Icons.meeting_room),
-                      label: '大厅',
-                    ),
-                    if (showCompanionTab)
-                      const NavigationDestination(
-                        icon: Icon(Icons.groups_outlined),
-                        selectedIcon: Icon(Icons.groups),
-                        label: '陪玩',
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 28,
+                        offset: const Offset(0, 12),
                       ),
-                    const NavigationDestination(
-                      icon: Icon(Icons.receipt_long_outlined),
-                      selectedIcon: Icon(Icons.receipt_long),
-                      label: '订单',
-                    ),
-                    const NavigationDestination(
-                      icon: Icon(Icons.person_outline),
-                      selectedIcon: Icon(Icons.person),
-                      label: '我的',
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: NavigationBar(
+                    selectedIndex: selectedNavIndex,
+                    onDestinationSelected: (index) {
+                      HapticFeedbackUtil.selectionClick();
+                      setState(() => navIndex = index);
+                      if (showCompanionTab && index == 1) {
+                        _loadRooms();
+                      }
+                    },
+                    backgroundColor: Colors.transparent,
+                    destinations: [
+                      const NavigationDestination(
+                        icon: Icon(Icons.meeting_room_outlined),
+                        selectedIcon: Icon(Icons.meeting_room),
+                        label: '大厅',
+                      ),
+                      if (showCompanionTab)
+                        const NavigationDestination(
+                          icon: Icon(Icons.groups_outlined),
+                          selectedIcon: Icon(Icons.groups),
+                          label: '陪玩',
+                        ),
+                      const NavigationDestination(
+                        icon: Icon(Icons.receipt_long_outlined),
+                        selectedIcon: Icon(Icons.receipt_long),
+                        label: '订单',
+                      ),
+                      const NavigationDestination(
+                        icon: Icon(Icons.person_outline),
+                        selectedIcon: Icon(Icons.person),
+                        label: '我的',
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -759,22 +835,10 @@ class _PlatformShellState extends State<PlatformShell> {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search_rounded),
-                  hintText: '搜索昵称、关键词、段位',
-                ),
-                onChanged: (value) {
-                  setState(() => roomKeyword = value);
-                  _loadRooms();
-                },
-              ),
-            ),
-            const SizedBox(width: 12),
-            PopupMenuButton<String>(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 560;
+            final filterButton = PopupMenuButton<String>(
               initialValue: roomFilter,
               onSelected: (value) {
                 setState(() => roomFilter = value);
@@ -793,10 +857,9 @@ class _PlatformShellState extends State<PlatformShell> {
                 icon: const Icon(Icons.tune_rounded),
                 label: Text(roomFilter),
               ),
-            ),
-            const SizedBox(width: 8),
-            // 高级筛选按钮
-            IconButton.filledTonal(
+            );
+
+            final advancedButton = IconButton.filledTonal(
               onPressed: _showAdvancedFilterSheet,
               icon: Badge(
                 isLabelVisible: _hasActiveFilters,
@@ -804,8 +867,53 @@ class _PlatformShellState extends State<PlatformShell> {
                 child: const Icon(Icons.filter_list_rounded),
               ),
               tooltip: '高级筛选',
-            ),
-          ],
+            );
+
+            final searchField = TextField(
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: '搜索昵称、关键词、段位',
+              ),
+              onChanged: (value) {
+                setState(() => roomKeyword = value);
+                _loadRooms();
+              },
+            );
+
+            if (compact) {
+              return Column(
+                children: [
+                  searchField,
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _adaptiveScaleDown(
+                          alignment: Alignment.centerLeft,
+                          child: filterButton,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      advancedButton,
+                    ],
+                  ),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(child: searchField),
+                const SizedBox(width: 12),
+                _adaptiveScaleDown(
+                  alignment: Alignment.centerRight,
+                  child: filterButton,
+                ),
+                const SizedBox(width: 8),
+                advancedButton,
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         SingleChildScrollView(
@@ -943,23 +1051,52 @@ class _PlatformShellState extends State<PlatformShell> {
                         children: room.tags.map((e) => _tagPill(e)).toList(),
                       ),
                       const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Text(
-                            '服务费 ${room.commission}',
-                            style: const TextStyle(
-                              color: Color(0xFF6B7280),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const Spacer(),
-                          FilledButton(
-                            onPressed: () => _openRoomDetail(room),
-                            child: Text(
-                              role == UserRole.boss ? '查看房间' : '查看接单',
-                            ),
-                          ),
-                        ],
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          if (constraints.maxWidth < 420) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '服务费 ${room.commission}',
+                                  style: const TextStyle(
+                                    color: Color(0xFF6B7280),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: FilledButton(
+                                    onPressed: () => _openRoomDetail(room),
+                                    child: Text(
+                                      role == UserRole.boss ? '查看房间' : '查看接单',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          return Row(
+                            children: [
+                              Text(
+                                '服务费 ${room.commission}',
+                                style: const TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const Spacer(),
+                              FilledButton(
+                                onPressed: () => _openRoomDetail(room),
+                                child: Text(
+                                  role == UserRole.boss ? '查看房间' : '查看接单',
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -990,44 +1127,62 @@ class _PlatformShellState extends State<PlatformShell> {
             (companion) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: _surfaceCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            companion.name,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final profileInfo = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          companion.name,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${companion.rank} · ${companion.pricePerGame}/局 · 评分 ${companion.rating.toStringAsFixed(1)}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF6B7280),
-                            ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${companion.rank} · ${companion.pricePerGame}/局 · 评分 ${companion.rating.toStringAsFixed(1)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF6B7280),
                           ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: companion.tags
-                                .map((tag) => _tagPill(tag))
-                                .toList(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    FilledButton.tonal(
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: companion.tags.map(_tagPill).toList(),
+                        ),
+                      ],
+                    );
+
+                    final inviteButton = FilledButton.tonal(
                       onPressed: () => _inviteCompanionFromLobby(companion),
                       child: const Text('邀请进房'),
-                    ),
-                  ],
+                    );
+
+                    if (constraints.maxWidth < 440) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          profileInfo,
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: inviteButton,
+                          ),
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(child: profileInfo),
+                        const SizedBox(width: 10),
+                        inviteButton,
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -1250,12 +1405,6 @@ class _PlatformShellState extends State<PlatformShell> {
   Widget _buildProfilePage() {
     return ListView(
       children: [
-        _pageHero(
-          title: '我的',
-          subtitle: '角色切换、等级体系和治理入口集中在这里。',
-          trailing: _statBadge('实名认证', verificationStatusLabel),
-        ),
-        const SizedBox(height: 16),
         _surfaceCard(
           child: Row(
             children: [
@@ -1270,14 +1419,47 @@ class _PlatformShellState extends State<PlatformShell> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '玩家：风暴小刘',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          '玩家：$profileDisplayName',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        _adaptiveScaleDown(
+                          alignment: Alignment.centerLeft,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () {
+                                HapticFeedbackUtil.lightImpact();
+                                if (verification.isVerified) {
+                                  _showSnackBar('您已完成实名认证');
+                                  return;
+                                }
+                                _showIdentityRequiredDialog();
+                              },
+                              child: _statusBadge(
+                                verificationStatusTag,
+                                verificationStatusColor,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
+                    Text(
+                      '手机号：$profilePhone',
+                      style: const TextStyle(color: Color(0xFF6B7280)),
+                    ),
+                    const SizedBox(height: 2),
                     Text(
                       verificationSummary,
                       style: const TextStyle(color: Color(0xFF6B7280)),
@@ -1285,19 +1467,23 @@ class _PlatformShellState extends State<PlatformShell> {
                   ],
                 ),
               ),
+              const SizedBox(width: 6),
+              IconButton.filledTonal(
+                tooltip: '编辑资料',
+                onPressed: _openProfileEditPage,
+                icon: const Icon(Icons.settings_rounded, size: 18),
+                style: IconButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(height: 12),
         _surfaceCard(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                '当前身份',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-              ),
-              SegmentedButton<UserRole>(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final roleSwitcher = SegmentedButton<UserRole>(
                 segments: const [
                   ButtonSegment<UserRole>(
                     value: UserRole.boss,
@@ -1338,88 +1524,99 @@ class _PlatformShellState extends State<PlatformShell> {
                   _startCompanionAutoRefresh();
                   await _loadRooms();
                 },
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        // 会员等级卡片 - 可点击进入详情
-        GestureDetector(
-          onTap: () {
-            HapticFeedbackUtil.lightImpact();
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => PointsMemberPage(api: widget.api),
-              ),
-            );
-          },
-          child: _surfaceCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+              );
+
+              if (constraints.maxWidth < 520) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      '会员等级',
+                      '当前身份',
                       style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const Spacer(),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: Colors.grey.shade400,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFD700).withAlpha(51),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(
-                        Icons.star_rounded,
-                        color: Color(0xFFFFD700),
-                        size: 24,
+                    const SizedBox(height: 10),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: _adaptiveScaleDown(
+                        alignment: Alignment.centerLeft,
+                        child: roleSwitcher,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Lv.1 新手',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          '点击查看等级权益和积分明细',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF6B7280),
-                          ),
-                        ),
-                      ],
-                    ),
                   ],
-                ),
-              ],
-            ),
+                );
+              }
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    '当前身份',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                  Flexible(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: _adaptiveScaleDown(
+                          alignment: Alignment.centerRight,
+                          child: roleSwitcher,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
         const SizedBox(height: 12),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Text(
+            '账户与资产',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         _surfaceCard(
           child: Column(
             children: [
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0x1AFFD700),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.star_rounded,
+                    color: Color(0xFFFFD700),
+                    size: 22,
+                  ),
+                ),
+                title: const Text('会员等级'),
+                subtitle: const Text('Lv.1 新手 · 查看等级权益和积分明细'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  HapticFeedbackUtil.lightImpact();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PointsMemberPage(api: widget.api),
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 1),
               ListTile(
                 leading: Container(
                   width: 40,
@@ -1449,25 +1646,13 @@ class _PlatformShellState extends State<PlatformShell> {
                     ),
                   ],
                 ),
-                trailing: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      walletBalanceLabel,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFFF59E0B),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
-                      size: 20,
-                    ),
-                  ],
+                trailing: Text(
+                  walletBalanceLabel,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFF59E0B),
+                  ),
                 ),
                 onTap: () async {
                   HapticFeedbackUtil.lightImpact();
@@ -1480,41 +1665,43 @@ class _PlatformShellState extends State<PlatformShell> {
                   await _refreshWalletBalance();
                 },
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.gavel_rounded),
-                title: const Text('信用体系与治理'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () {
-                  HapticFeedbackUtil.lightImpact();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => Scaffold(
-                        appBar: AppBar(title: const Text('信用体系与治理')),
-                        body: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: _buildGovernancePage(),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.verified_user_rounded),
-                title: const Text('实名认证'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () {
-                  if (verification.isVerified) {
-                    _showSnackBar('您已完成实名认证');
-                    return;
-                  }
-                  _showIdentityRequiredDialog();
-                },
-              ),
             ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Text(
+            '安全与治理',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _surfaceCard(
+          child: ListTile(
+            leading: const Icon(Icons.gavel_rounded),
+            title: const Text('信用体系与治理'),
+            subtitle: const Text('举报审核、资金规则与通知机制'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () {
+              HapticFeedbackUtil.lightImpact();
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(title: const Text('信用体系与治理')),
+                    body: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: _buildGovernancePage(),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],
@@ -1696,6 +1883,13 @@ class _PlatformShellState extends State<PlatformShell> {
     );
   }
 
+  Widget _adaptiveScaleDown({
+    required Widget child,
+    Alignment alignment = Alignment.centerLeft,
+  }) {
+    return FittedBox(fit: BoxFit.scaleDown, alignment: alignment, child: child);
+  }
+
   Widget _miniMetric(String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1772,6 +1966,35 @@ class _PlatformShellState extends State<PlatformShell> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openProfileEditPage() async {
+    HapticFeedbackUtil.lightImpact();
+    final initial =
+        userProfile ??
+        UserProfile(
+          userId: '',
+          displayName: profileDisplayName,
+          phone: userProfile?.phone ?? '',
+        );
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _ProfileEditPage(
+          api: widget.api,
+          initial: initial,
+          onLogout: widget.onLogout,
+          onProfileUpdated: (updated) {
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              userProfile = updated;
+            });
+          },
         ),
       ),
     );
@@ -1922,18 +2145,27 @@ class _PlatformShellState extends State<PlatformShell> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          SegmentedButton<int>(
-                            segments: const [
-                              ButtonSegment<int>(value: 10, label: Text('10%')),
-                              ButtonSegment<int>(value: 20, label: Text('20%')),
-                            ],
-                            selected: <int>{serviceFeeRate},
-                            showSelectedIcon: false,
-                            onSelectionChanged: (selection) {
-                              setLocalState(
-                                () => serviceFeeRate = selection.first,
-                              );
-                            },
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: SegmentedButton<int>(
+                              segments: const [
+                                ButtonSegment<int>(
+                                  value: 10,
+                                  label: Text('10%'),
+                                ),
+                                ButtonSegment<int>(
+                                  value: 20,
+                                  label: Text('20%'),
+                                ),
+                              ],
+                              selected: <int>{serviceFeeRate},
+                              showSelectedIcon: false,
+                              onSelectionChanged: (selection) {
+                                setLocalState(
+                                  () => serviceFeeRate = selection.first,
+                                );
+                              },
+                            ),
                           ),
                         ],
                       ),
@@ -2403,6 +2635,291 @@ class _PlatformShellState extends State<PlatformShell> {
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
       (match) => '${match[1]},',
     );
+  }
+}
+
+class _ProfileEditPage extends StatefulWidget {
+  const _ProfileEditPage({
+    required this.api,
+    required this.initial,
+    this.onLogout,
+    this.onProfileUpdated,
+  });
+
+  final PlatformApi api;
+  final UserProfile initial;
+  final Future<void> Function()? onLogout;
+  final ValueChanged<UserProfile>? onProfileUpdated;
+
+  @override
+  State<_ProfileEditPage> createState() => _ProfileEditPageState();
+}
+
+class _ProfileEditPageState extends State<_ProfileEditPage> {
+  late String _displayName;
+  late String _phone;
+  String? _pendingPassword;
+  bool _saving = false;
+  bool _loggingOut = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayName = widget.initial.displayName;
+    _phone = widget.initial.phone;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('个人信息'),
+        actions: [
+          TextButton(
+            onPressed: (_saving || _loggingOut) ? null : _save,
+            child: Text(_saving ? '保存中...' : '保存'),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: const Color(0xFFEAEAF0)),
+            ),
+            child: Column(
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.badge_outlined),
+                  title: const Text('用户名称'),
+                  subtitle: Text(_displayName.isEmpty ? '未设置' : _displayName),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _editField(_ProfileEditType.displayName),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.phone_outlined),
+                  title: const Text('手机号'),
+                  subtitle: Text(_phone.isEmpty ? '未绑定' : _phone),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _editField(_ProfileEditType.phone),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.lock_outline_rounded),
+                  title: const Text('密码'),
+                  subtitle: Text(
+                    _pendingPassword == null ? '已设置，点击修改' : '已修改，保存后生效',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _editField(_ProfileEditType.password),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '参考常见个人信息修改方式：先编辑字段，再统一保存。',
+            style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: const Color(0xFFEAEAF0)),
+            ),
+            child: ListTile(
+              enabled: !_saving && !_loggingOut,
+              leading: const Icon(
+                Icons.logout_rounded,
+                color: Color(0xFFDC2626),
+              ),
+              title: Text(
+                _loggingOut ? '退出中...' : '退出登录',
+                style: const TextStyle(
+                  color: Color(0xFFDC2626),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              trailing: const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF9CA3AF),
+              ),
+              onTap: _logout,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editField(_ProfileEditType type) async {
+    final title = switch (type) {
+      _ProfileEditType.displayName => '修改用户名称',
+      _ProfileEditType.phone => '修改手机号',
+      _ProfileEditType.password => '修改密码',
+    };
+    final hint = switch (type) {
+      _ProfileEditType.displayName => '请输入新的用户名称',
+      _ProfileEditType.phone => '请输入新的手机号',
+      _ProfileEditType.password => '请输入新的密码',
+    };
+    final initialValue = switch (type) {
+      _ProfileEditType.displayName => _displayName,
+      _ProfileEditType.phone => _phone,
+      _ProfileEditType.password => '',
+    };
+
+    final controller = TextEditingController(text: initialValue);
+    try {
+      final value = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(title),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              obscureText: type == _ProfileEditType.password,
+              keyboardType: type == _ProfileEditType.phone
+                  ? TextInputType.phone
+                  : TextInputType.text,
+              decoration: InputDecoration(hintText: hint),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext, controller.text.trim());
+                },
+                child: const Text('确定'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (!mounted || value == null || value.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        switch (type) {
+          case _ProfileEditType.displayName:
+            _displayName = value;
+            break;
+          case _ProfileEditType.phone:
+            _phone = value;
+            break;
+          case _ProfileEditType.password:
+            _pendingPassword = value;
+            break;
+        }
+      });
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _save() async {
+    if (_displayName.trim().isEmpty || _phone.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('用户名称和手机号不能为空')));
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final updated = await widget.api.updateUserProfile(
+        displayName: _displayName.trim(),
+        phone: _phone.trim(),
+        password: _pendingPassword,
+      );
+      if (!mounted) {
+        return;
+      }
+      widget.onProfileUpdated?.call(updated);
+      setState(() {
+        _displayName = updated.displayName;
+        _phone = updated.phone;
+        _pendingPassword = null;
+      });
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(content: Text('修改成功')));
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('保存失败：$e')));
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('退出账号'),
+          content: const Text('确认退出当前账号吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('退出'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    setState(() => _loggingOut = true);
+    try {
+      await widget.api.logout();
+      if (widget.onLogout != null) {
+        await widget.onLogout!();
+      }
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('退出失败：$e')));
+    } finally {
+      if (mounted) {
+        setState(() => _loggingOut = false);
+      }
+    }
   }
 }
 

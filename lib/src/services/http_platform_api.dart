@@ -40,11 +40,20 @@ class HttpPlatformApi implements PlatformApi {
     required String phone,
     required String smsCode,
     required UserRole role,
+    String? displayName,
   }) async {
+    final body = <String, dynamic>{
+      'phone': phone,
+      'sms_code': smsCode,
+      'user_role': role.name,
+    };
+    if (displayName != null && displayName.trim().isNotEmpty) {
+      body['display_name'] = displayName.trim();
+    }
     final payload = await _request(
       method: 'POST',
       path: '/auth/register/sms',
-      body: {'phone': phone, 'sms_code': smsCode, 'user_role': role.name},
+      body: body,
       authRequired: false,
     );
     final session = AuthSession.fromJson(payload);
@@ -70,6 +79,31 @@ class HttpPlatformApi implements PlatformApi {
       path: '/auth/role',
       body: {'user_role': role.name},
     );
+  }
+
+  @override
+  Future<UserProfile> fetchUserProfile() async {
+    final payload = await _request(method: 'GET', path: '/user/profile');
+    return UserProfile.fromJson(payload as Map<String, dynamic>);
+  }
+
+  @override
+  Future<UserProfile> updateUserProfile({
+    required String displayName,
+    required String phone,
+    String? password,
+  }) async {
+    final body = <String, dynamic>{'display_name': displayName, 'phone': phone};
+    if (password != null && password.trim().isNotEmpty) {
+      body['password'] = password.trim();
+    }
+
+    final payload = await _request(
+      method: 'POST',
+      path: '/user/profile',
+      body: body,
+    );
+    return UserProfile.fromJson(payload as Map<String, dynamic>);
   }
 
   @override
