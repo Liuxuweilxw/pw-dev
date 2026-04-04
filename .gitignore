@@ -48,3 +48,5 @@ app.*.map.json
 
 # Backend binary artifacts
 backend/bin/*.exe
+ios/*
+macos/*
