@@ -95,10 +95,14 @@ class HttpPlatformApi implements PlatformApi {
     required String displayName,
     required String phone,
     String? password,
+    String? avatar,
   }) async {
     final body = <String, dynamic>{'display_name': displayName, 'phone': phone};
     if (password != null && password.trim().isNotEmpty) {
       body['password'] = password.trim();
+    }
+    if (avatar != null && avatar.trim().isNotEmpty) {
+      body['avatar'] = avatar.trim();
     }
 
     final payload = await _request(
@@ -114,11 +118,17 @@ class HttpPlatformApi implements PlatformApi {
     required UserRole role,
     String keyword = '',
     String filter = '全部',
+    String sort = 'latest',
   }) async {
     final payload = await _request(
       method: 'GET',
       path: '/rooms',
-      query: {'role': role.name, 'keyword': keyword, 'filter': filter},
+      query: {
+        'role': role.name,
+        'keyword': keyword,
+        'filter': filter,
+        'sort': sort,
+      },
     );
     final list = _asList(payload);
     return list
@@ -493,6 +503,31 @@ class HttpPlatformApi implements PlatformApi {
     final payload = await _request(method: 'GET', path: '/reports/mine');
     final list = _asList(payload);
     return list.whereType<Map<String, dynamic>>().map(Report.fromJson).toList();
+  }
+
+  @override
+  Future<List<Report>> fetchAllReports() async {
+    final payload = await _request(method: 'GET', path: '/reports/all');
+    final list = _asList(payload);
+    return list.whereType<Map<String, dynamic>>().map(Report.fromJson).toList();
+  }
+
+  @override
+  Future<Report> reviewReport({
+    required String reportId,
+    required String status,
+    String? adminNotes,
+  }) async {
+    final payload = await _request(
+      method: 'POST',
+      path: '/reports/$reportId/review',
+      body: {
+        'status': status,
+        if (adminNotes != null && adminNotes.trim().isNotEmpty)
+          'admin_notes': adminNotes.trim(),
+      },
+    );
+    return Report.fromJson(payload as Map<String, dynamic>);
   }
 
   Future<dynamic> _request({

@@ -39,6 +39,7 @@ class _PlatformShellState extends State<PlatformShell> {
   IdentityVerification verification = const IdentityVerification();
   String roomKeyword = '';
   String roomFilter = '全部';
+  String roomSort = 'latest';
   bool isLoading = true;
   String? loadError;
 
@@ -74,6 +75,14 @@ class _PlatformShellState extends State<PlatformShell> {
     return '未绑定手机号';
   }
 
+  String get profileAvatar {
+    final value = userProfile?.avatar.trim() ?? '';
+    if (value.isNotEmpty) {
+      return value;
+    }
+    return '🎮';
+  }
+
   bool get isVerified => verification.isVerified;
 
   String get verificationStatusLabel {
@@ -99,7 +108,7 @@ class _PlatformShellState extends State<PlatformShell> {
     if (verification.isRejected) {
       return '实名认证未通过，请重新提交资料后再创建房间';
     }
-    return '手机号登录，实名认证后解锁资金交易与创建房间';
+    return '实名认证后解锁资金交易与创建房间';
   }
 
   String get verificationStatusTag {
@@ -186,6 +195,7 @@ class _PlatformShellState extends State<PlatformShell> {
           role: role,
           keyword: roomKeyword,
           filter: roomFilter,
+          sort: roomSort,
         ),
         widget.api.fetchJoinedRooms(),
         widget.api.fetchPendingInvitations(),
@@ -243,6 +253,7 @@ class _PlatformShellState extends State<PlatformShell> {
         role: role,
         keyword: roomKeyword,
         filter: roomFilter,
+        sort: roomSort,
       );
       final joinedRoomsFuture = widget.api.fetchJoinedRooms();
       final companionsFuture = role == UserRole.boss
@@ -336,7 +347,28 @@ class _PlatformShellState extends State<PlatformShell> {
       }).toList();
     }
 
-    return result;
+    final sorted = result.toList(growable: true);
+    switch (roomSort) {
+      case 'price_asc':
+        sorted.sort((a, b) => a.price.compareTo(b.price));
+        break;
+      case 'price_desc':
+        sorted.sort((a, b) => b.price.compareTo(a.price));
+        break;
+      case 'seats_desc':
+        sorted.sort((a, b) => b.seatsLeft.compareTo(a.seatsLeft));
+        break;
+      case 'latest':
+      default:
+        sorted.sort((a, b) {
+          final aId = int.tryParse(a.id.replaceFirst('R-', '')) ?? 0;
+          final bId = int.tryParse(b.id.replaceFirst('R-', '')) ?? 0;
+          return bId.compareTo(aId);
+        });
+        break;
+    }
+
+    return sorted;
   }
 
   /// 显示高级筛选底部弹窗
@@ -850,26 +882,6 @@ class _PlatformShellState extends State<PlatformShell> {
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 560;
-            final filterButton = PopupMenuButton<String>(
-              initialValue: roomFilter,
-              onSelected: (value) {
-                setState(() => roomFilter = value);
-                _loadRooms();
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: '全部', child: Text('全部')),
-                PopupMenuItem(value: '待加入', child: Text('待加入')),
-                PopupMenuItem(value: '进行中', child: Text('进行中')),
-                PopupMenuItem(value: '新手房间', child: Text('新手房间')),
-                PopupMenuItem(value: '高分段', child: Text('高分段')),
-                PopupMenuItem(value: '紧急', child: Text('紧急需求')),
-              ],
-              child: FilledButton.tonalIcon(
-                onPressed: null,
-                icon: const Icon(Icons.tune_rounded),
-                label: Text(roomFilter),
-              ),
-            );
 
             final advancedButton = IconButton.filledTonal(
               onPressed: _showAdvancedFilterSheet,
@@ -879,6 +891,25 @@ class _PlatformShellState extends State<PlatformShell> {
                 child: const Icon(Icons.filter_list_rounded),
               ),
               tooltip: '高级筛选',
+            );
+
+            final sortButton = PopupMenuButton<String>(
+              initialValue: roomSort,
+              onSelected: (value) {
+                setState(() => roomSort = value);
+                _loadRooms();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'latest', child: Text('最新发布')),
+                PopupMenuItem(value: 'price_asc', child: Text('单价从低到高')),
+                PopupMenuItem(value: 'price_desc', child: Text('单价从高到低')),
+                PopupMenuItem(value: 'seats_desc', child: Text('空位最多优先')),
+              ],
+              child: FilledButton.tonalIcon(
+                onPressed: null,
+                icon: const Icon(Icons.sort_rounded),
+                label: Text(_roomSortLabel(roomSort)),
+              ),
             );
 
             final searchField = TextField(
@@ -899,10 +930,11 @@ class _PlatformShellState extends State<PlatformShell> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _adaptiveScaleDown(
                           alignment: Alignment.centerLeft,
-                          child: filterButton,
+                          child: sortButton,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -916,10 +948,10 @@ class _PlatformShellState extends State<PlatformShell> {
             return Row(
               children: [
                 Expanded(child: searchField),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 _adaptiveScaleDown(
                   alignment: Alignment.centerRight,
-                  child: filterButton,
+                  child: sortButton,
                 ),
                 const SizedBox(width: 8),
                 advancedButton,
@@ -1188,6 +1220,55 @@ class _PlatformShellState extends State<PlatformShell> {
           );
         }),
       ],
+    );
+  }
+
+  Widget _buildRoleSwitcherCompact() {
+    final roleSwitcher = SegmentedButton<UserRole>(
+      segments: const [
+        ButtonSegment<UserRole>(
+          value: UserRole.boss,
+          label: Text('找陪玩'),
+          icon: Icon(Icons.group_rounded),
+        ),
+        ButtonSegment<UserRole>(
+          value: UserRole.companion,
+          label: Text('接单'),
+          icon: Icon(Icons.sports_esports_rounded),
+        ),
+      ],
+      selected: <UserRole>{role},
+      onSelectionChanged: (Set<UserRole> newSelection) async {
+        HapticFeedbackUtil.mediumImpact();
+        final nextRole = newSelection.first;
+        setState(() {
+          if (role != nextRole) {
+            if (nextRole == UserRole.companion) {
+              if (navIndex == 1) {
+                navIndex = 0;
+              } else if (navIndex == 2) {
+                navIndex = 1;
+              } else if (navIndex == 3) {
+                navIndex = 2;
+              }
+            } else {
+              if (navIndex == 1) {
+                navIndex = 2;
+              } else if (navIndex == 2) {
+                navIndex = 3;
+              }
+            }
+          }
+          role = nextRole;
+        });
+        await widget.api.updateUserRole(nextRole);
+        _startCompanionAutoRefresh();
+        await _loadRooms();
+      },
+    );
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: roleSwitcher,
     );
   }
 
@@ -1490,11 +1571,11 @@ class _PlatformShellState extends State<PlatformShell> {
         _surfaceCard(
           child: Row(
             children: [
-              const CircleAvatar(
+              CircleAvatar(
                 radius: 26,
                 backgroundColor: Color(0x1A0071E3),
                 foregroundColor: Color(0xFF0071E3),
-                child: Icon(Icons.person_rounded),
+                child: Text(profileAvatar, style: TextStyle(fontSize: 22)),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -1507,7 +1588,7 @@ class _PlatformShellState extends State<PlatformShell> {
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
-                          '玩家：$profileDisplayName',
+                          '$profileDisplayName',
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
@@ -1536,11 +1617,6 @@ class _PlatformShellState extends State<PlatformShell> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '手机号：$profilePhone',
-                      style: const TextStyle(color: Color(0xFF6B7280)),
-                    ),
                     const SizedBox(height: 2),
                     Text(
                       verificationSummary,
@@ -1553,7 +1629,7 @@ class _PlatformShellState extends State<PlatformShell> {
               IconButton.filledTonal(
                 tooltip: '编辑资料',
                 onPressed: _openProfileEditPage,
-                icon: const Icon(Icons.settings_rounded, size: 18),
+                icon: const Icon(Icons.settings_rounded, size: 24),
                 style: IconButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                 ),
@@ -1563,96 +1639,22 @@ class _PlatformShellState extends State<PlatformShell> {
         ),
         const SizedBox(height: 12),
         _surfaceCard(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final roleSwitcher = SegmentedButton<UserRole>(
-                segments: const [
-                  ButtonSegment<UserRole>(
-                    value: UserRole.boss,
-                    label: Text('找陪玩'),
-                    icon: Icon(Icons.group_rounded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '身份',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF3A3A3C),
                   ),
-                  ButtonSegment<UserRole>(
-                    value: UserRole.companion,
-                    label: Text('接单'),
-                    icon: Icon(Icons.sports_esports_rounded),
-                  ),
-                ],
-                selected: <UserRole>{role},
-                onSelectionChanged: (Set<UserRole> newSelection) async {
-                  HapticFeedbackUtil.mediumImpact();
-                  final nextRole = newSelection.first;
-                  setState(() {
-                    if (role != nextRole) {
-                      if (nextRole == UserRole.companion) {
-                        if (navIndex == 1) {
-                          navIndex = 0;
-                        } else if (navIndex == 2) {
-                          navIndex = 1;
-                        } else if (navIndex == 3) {
-                          navIndex = 2;
-                        }
-                      } else {
-                        if (navIndex == 1) {
-                          navIndex = 2;
-                        } else if (navIndex == 2) {
-                          navIndex = 3;
-                        }
-                      }
-                    }
-                    role = nextRole;
-                  });
-                  await widget.api.updateUserRole(nextRole);
-                  _startCompanionAutoRefresh();
-                  await _loadRooms();
-                },
-              );
-
-              if (constraints.maxWidth < 520) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '当前身份',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: _adaptiveScaleDown(
-                        alignment: Alignment.centerLeft,
-                        child: roleSwitcher,
-                      ),
-                    ),
-                  ],
-                );
-              }
-
-              return Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    '当前身份',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-                  ),
-                  Flexible(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: _adaptiveScaleDown(
-                          alignment: Alignment.centerRight,
-                          child: roleSwitcher,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
+                ),
+                _buildRoleSwitcherCompact(),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -2061,6 +2063,7 @@ class _PlatformShellState extends State<PlatformShell> {
           userId: '',
           displayName: profileDisplayName,
           phone: userProfile?.phone ?? '',
+          avatar: userProfile?.avatar ?? profileAvatar,
         );
 
     await Navigator.of(context).push<void>(
@@ -2746,6 +2749,20 @@ class _PlatformShellState extends State<PlatformShell> {
       (match) => '${match[1]},',
     );
   }
+
+  String _roomSortLabel(String sort) {
+    switch (sort) {
+      case 'price_asc':
+        return '单价↑';
+      case 'price_desc':
+        return '单价↓';
+      case 'seats_desc':
+        return '空位优先';
+      case 'latest':
+      default:
+        return '最新';
+    }
+  }
 }
 
 class _ProfileEditPage extends StatefulWidget {
@@ -2768,15 +2785,34 @@ class _ProfileEditPage extends StatefulWidget {
 class _ProfileEditPageState extends State<_ProfileEditPage> {
   late String _displayName;
   late String _phone;
+  late String _avatar;
   String? _pendingPassword;
   bool _saving = false;
   bool _loggingOut = false;
+
+  static const List<String> _avatarOptions = [
+    '🎮',
+    '🦊',
+    '🐼',
+    '🐯',
+    '🐻',
+    '🦁',
+    '🐧',
+    '🐵',
+    '🐨',
+    '🐸',
+    '🦄',
+    '🐙',
+  ];
 
   @override
   void initState() {
     super.initState();
     _displayName = widget.initial.displayName;
     _phone = widget.initial.phone;
+    _avatar = widget.initial.avatar.trim().isEmpty
+        ? '🎮'
+        : widget.initial.avatar;
   }
 
   @override
@@ -2803,6 +2839,21 @@ class _ProfileEditPageState extends State<_ProfileEditPage> {
             ),
             child: Column(
               children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: const Color(0x1A0071E3),
+                    child: Text(_avatar, style: const TextStyle(fontSize: 16)),
+                  ),
+                  title: const Text('用户头像'),
+                  subtitle: Text('当前头像：$_avatar'),
+                  trailing: FilledButton.tonal(
+                    onPressed: _selectAvatar,
+                    child: const Text('设置头像'),
+                  ),
+                ),
+                const Divider(height: 1),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.badge_outlined),
@@ -2956,6 +3007,7 @@ class _ProfileEditPageState extends State<_ProfileEditPage> {
         displayName: _displayName.trim(),
         phone: _phone.trim(),
         password: _pendingPassword,
+        avatar: _avatar,
       );
       if (!mounted) {
         return;
@@ -2964,6 +3016,7 @@ class _ProfileEditPageState extends State<_ProfileEditPage> {
       setState(() {
         _displayName = updated.displayName;
         _phone = updated.phone;
+        _avatar = updated.avatar;
         _pendingPassword = null;
       });
       ScaffoldMessenger.of(context)
@@ -2981,6 +3034,68 @@ class _ProfileEditPageState extends State<_ProfileEditPage> {
         setState(() => _saving = false);
       }
     }
+  }
+
+  Future<void> _selectAvatar() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '选择头像',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _avatarOptions.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 6,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 1,
+                  ),
+                  itemBuilder: (context, index) {
+                    final avatar = _avatarOptions[index];
+                    final selected = avatar == _avatar;
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => Navigator.pop(sheetContext, avatar),
+                      child: CircleAvatar(
+                        radius: 18,
+                        backgroundColor: selected
+                            ? const Color(0x260071E3)
+                            : const Color(0xFFF3F4F6),
+                        child: Text(
+                          avatar,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || selected == null || selected.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _avatar = selected;
+    });
   }
 
   Future<void> _logout() async {
@@ -3067,15 +3182,21 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   final Set<String> _messageIds = <String>{};
   Timer? _typingDebounce;
   Timer? _memberRefreshTimer;
+  Timer? _roomStateRefreshTimer;
   final Set<String> _rejectedCompanionNotified = <String>{};
   final Set<String> _invitationStatusNotified = <String>{};
   bool _isRejectDialogShowing = false;
+  bool _isLeavingRoom = false;
 
   late RoomItem _currentRoom;
   late List<RoomMemberItem> _members;
   bool _isProcessing = false;
   bool _isConnected = false;
   bool _isTyping = false;
+  bool _isLoadingHistory = false;
+  bool _hasMoreHistory = true;
+  int _historyOffset = 0;
+  static const int _historyPageSize = 50;
   StreamSubscription<ChatMessage>? _messageSubscription;
   StreamSubscription<bool>? _connectionSubscription;
 
@@ -3086,6 +3207,105 @@ class _RoomChatPageState extends State<_RoomChatPage> {
     _members = List<RoomMemberItem>.from(widget.initialMembers);
     _initChat();
     _startMemberAutoRefresh();
+    _startRoomStateRefresh();
+  }
+
+  void _startRoomStateRefresh() {
+    _roomStateRefreshTimer?.cancel();
+    _roomStateRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _refreshRoomSnapshot();
+    });
+  }
+
+  Future<void> _refreshRoomSnapshot() async {
+    if (!mounted || _isProcessing || _isLeavingRoom) {
+      return;
+    }
+
+    try {
+      final allRooms = await widget.api.fetchRooms(
+        role: widget.currentUserRole,
+        keyword: '',
+        filter: '全部',
+      );
+      if (!mounted || _isLeavingRoom) {
+        return;
+      }
+
+      final roomIndex = allRooms.indexWhere(
+        (room) => room.id == _currentRoom.id,
+      );
+      if (roomIndex < 0) {
+        await _handleRoomUnavailable('当前房间已不存在，已为你返回大厅。');
+        return;
+      }
+
+      final latestRoom = allRooms[roomIndex];
+      if (latestRoom.status == '已解散') {
+        await _handleRoomUnavailable('当前房间已解散，已为你返回大厅。');
+        return;
+      }
+
+      final latestMembers = await widget.api.fetchRoomMembers(
+        roomId: _currentRoom.id,
+      );
+      if (!mounted || _isLeavingRoom) {
+        return;
+      }
+
+      setState(() {
+        _currentRoom = latestRoom;
+        _members = List<RoomMemberItem>.from(latestMembers);
+      });
+    } catch (e) {
+      if (_isRoomUnavailableError(e)) {
+        await _handleRoomUnavailable('当前房间状态已变更，已为你返回大厅。');
+      }
+    }
+  }
+
+  bool _isRoomUnavailableError(Object error) {
+    final message = error.toString();
+    return message.contains('room not found') ||
+        message.contains('404') ||
+        message.contains('当前房间状态') ||
+        message.contains('已解散');
+  }
+
+  Future<void> _handleRoomUnavailable(String message) async {
+    if (!mounted || _isLeavingRoom) {
+      return;
+    }
+
+    _isLeavingRoom = true;
+    _roomStateRefreshTimer?.cancel();
+    _memberRefreshTimer?.cancel();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('房间状态已变更'),
+          content: Text(message),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('返回大厅'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    widget.onRoomUpdated();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   void _startMemberAutoRefresh() {
@@ -3251,9 +3471,19 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   }
 
   Future<void> _loadHistory() async {
+    if (_isLoadingHistory || !_hasMoreHistory) {
+      return;
+    }
     try {
-      final history = await _chatService.loadHistory(limit: 100);
-      if (!mounted || history.isEmpty) {
+      setState(() {
+        _isLoadingHistory = true;
+      });
+
+      final history = await _chatService.loadHistory(
+        limit: _historyPageSize,
+        offset: _historyOffset,
+      );
+      if (!mounted) {
         return;
       }
 
@@ -3261,10 +3491,20 @@ class _RoomChatPageState extends State<_RoomChatPage> {
         for (final message in history) {
           _mergeMessage(message);
         }
+        _historyOffset += history.length;
+        _hasMoreHistory = history.length >= _historyPageSize;
+        _isLoadingHistory = false;
       });
-      _scrollToBottom();
+      if (_historyOffset == history.length) {
+        _scrollToBottom();
+      }
     } catch (e) {
       print('加载聊天历史失败: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingHistory = false;
+        });
+      }
     }
   }
 
@@ -3298,6 +3538,7 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   void dispose() {
     _typingDebounce?.cancel();
     _memberRefreshTimer?.cancel();
+    _roomStateRefreshTimer?.cancel();
     _messageSubscription?.cancel();
     _connectionSubscription?.cancel();
     _chatService.dispose();
@@ -3506,7 +3747,8 @@ class _RoomChatPageState extends State<_RoomChatPage> {
                         onPressed: _isProcessing ? null : _rejectOrder,
                         isDanger: true,
                       ),
-                    ] else if (widget.currentUserRole == UserRole.companion) ...[
+                    ] else if (widget.currentUserRole ==
+                        UserRole.companion) ...[
                       _buildActionButton(
                         icon: Icons.verified_rounded,
                         label: '确认接单',
@@ -3637,6 +3879,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
       widget.showSnackBar('接单已确认');
       if (mounted) Navigator.of(context).pop(); // 关闭信息弹窗
     } catch (e) {
+      if (_isRoomUnavailableError(e)) {
+        await _handleRoomUnavailable('房间状态已变更，无法确认接单。');
+        return;
+      }
       widget.showSnackBar('确认接单失败：$e');
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -3663,6 +3909,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
         Navigator.of(context).pop();
       }
     } catch (e) {
+      if (_isRoomUnavailableError(e)) {
+        await _handleRoomUnavailable('房间状态已变更，无法拒绝邀请。');
+        return;
+      }
       widget.showSnackBar('拒绝邀请失败：$e');
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -3685,6 +3935,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
       });
       widget.showSnackBar('已取消对 ${member.userName} 的邀请');
     } catch (e) {
+      if (_isRoomUnavailableError(e)) {
+        await _handleRoomUnavailable('房间状态已变更，无法取消邀请。');
+        return;
+      }
       widget.showSnackBar('取消邀请失败：$e');
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -3702,6 +3956,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
         Navigator.of(context).pop(); // 返回上一页
       }
     } catch (e) {
+      if (_isRoomUnavailableError(e)) {
+        await _handleRoomUnavailable('房间状态已变更，无法继续解散操作。');
+        return;
+      }
       widget.showSnackBar('解散房间失败：$e');
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -3809,6 +4067,10 @@ class _RoomChatPageState extends State<_RoomChatPage> {
       widget.onRoomUpdated();
       widget.showSnackBar('订单已确认完成，触发结算（原型）');
     } catch (e) {
+      if (_isRoomUnavailableError(e)) {
+        await _handleRoomUnavailable('房间状态已变更，无法确认完成。');
+        return;
+      }
       widget.showSnackBar('确认完成失败：$e');
     }
   }
@@ -3832,12 +4094,8 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   String _currentInvitationStatus() {
     final currentMember = _members.firstWhere(
       (member) => member.userId == widget.currentUserId,
-      orElse: () => const RoomMemberItem(
-        userId: '',
-        userName: '',
-        role: '',
-        status: '',
-      ),
+      orElse: () =>
+          const RoomMemberItem(userId: '', userName: '', role: '', status: ''),
     );
     return currentMember.userId.isEmpty ? '' : currentMember.status;
   }
@@ -3845,12 +4103,8 @@ class _RoomChatPageState extends State<_RoomChatPage> {
   String _displayRoomStatus() {
     final currentMember = _members.firstWhere(
       (member) => member.userId == widget.currentUserId,
-      orElse: () => const RoomMemberItem(
-        userId: '',
-        userName: '',
-        role: '',
-        status: '',
-      ),
+      orElse: () =>
+          const RoomMemberItem(userId: '', userName: '', role: '', status: ''),
     );
     if (currentMember.userId.isNotEmpty &&
         _currentRoom.status == '待加入' &&
@@ -3975,9 +4229,38 @@ class _RoomChatPageState extends State<_RoomChatPage> {
                   : ListView.builder(
                       controller: _scrollController,
                       padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length,
+                      itemCount: _messages.length + 1,
                       itemBuilder: (context, index) {
-                        final message = _messages[index];
+                        if (index == 0) {
+                          if (_isLoadingHistory) {
+                            return const Padding(
+                              padding: EdgeInsets.only(bottom: 10),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          if (_hasMoreHistory) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Center(
+                                child: TextButton(
+                                  onPressed: _loadHistory,
+                                  child: const Text('加载更多历史消息'),
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        }
+
+                        final message = _messages[index - 1];
                         final isMe = message.senderId == widget.currentUserId;
                         final isSystem = message.isSystemMessage;
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
@@ -172,6 +173,7 @@ class _BackendApp {
   final List<Map<String, dynamic>> _rooms = [];
   final List<Map<String, dynamic>> _walletFlows = [];
   final List<Map<String, dynamic>> _orders = [];
+  final List<Map<String, dynamic>> _reports = [];
   final List<Map<String, dynamic>> _roomInvitations = [];
 
   // 聊天管理器
@@ -181,6 +183,7 @@ class _BackendApp {
 
   int _roomSeq = 13000;
   int _orderSeq = 20260402001;
+  int _reportSeq = 1;
   int _inviteSeq = 20260402001;
   static const Duration _inviteTimeout = Duration(minutes: 5);
 
@@ -241,6 +244,10 @@ class _BackendApp {
 
     router.post('/reports/rooms', _reportRoom);
     router.post('/reports/orders', _reportOrder);
+    router.post('/reports', _submitReport);
+    router.get('/reports/mine', _getMyReports);
+    router.get('/reports/all', _getAllReports);
+    router.post('/reports/<reportId>/review', _reviewReport);
   }
 
   /// WebSocket 聊天处理
@@ -353,10 +360,26 @@ class _BackendApp {
   /// 获取房间聊天历史
   Response _getRoomMessages(Request request, String roomId) {
     final limitParam = request.url.queryParameters['limit'];
-    final limit = int.tryParse(limitParam ?? '50') ?? 50;
+    final offsetParam = request.url.queryParameters['offset'];
+    final limit = (int.tryParse(limitParam ?? '50') ?? 50).clamp(1, 200);
+    final offset = (int.tryParse(offsetParam ?? '0') ?? 0).clamp(0, 1000000);
 
-    final messages = _chatManager.getMessageHistory(roomId, limit: limit);
-    return _ok(messages.map((m) => m.toJson()).toList());
+    final messages = _chatManager.getMessageHistory(
+      roomId,
+      limit: limit,
+      offset: offset,
+    );
+    final total = _chatManager.getMessageTotal(roomId);
+
+    return _ok({
+      'items': messages.map((m) => m.toJson()).toList(),
+      'paging': {
+        'limit': limit,
+        'offset': offset,
+        'total': total,
+        'has_more': offset + messages.length < total,
+      },
+    });
   }
 
   Future<Response> _loginWithSms(Request request) async {
@@ -479,6 +502,7 @@ class _BackendApp {
       'user_id': account.userId,
       'display_name': account.displayName,
       'phone': account.phone,
+      'avatar': account.avatar,
     });
   }
 
@@ -492,6 +516,7 @@ class _BackendApp {
     final displayName = (body['display_name'] ?? '').toString().trim();
     final phone = (body['phone'] ?? '').toString().trim();
     final password = (body['password'] ?? '').toString().trim();
+    final avatar = (body['avatar'] ?? '').toString().trim();
 
     if (displayName.isEmpty || phone.isEmpty) {
       return _error('display_name/phone 不能为空', statusCode: 400);
@@ -504,6 +529,7 @@ class _BackendApp {
         displayName: displayName,
         phone: phone,
         password: password.isEmpty ? null : password,
+        avatar: avatar.isEmpty ? null : avatar,
       );
     } on FormatException catch (e) {
       return _error(e.message, statusCode: 409);
@@ -517,6 +543,7 @@ class _BackendApp {
       'user_id': account.userId,
       'display_name': account.displayName,
       'phone': account.phone,
+      'avatar': account.avatar,
     });
   }
 
@@ -600,6 +627,7 @@ class _BackendApp {
 
     final keyword = (request.url.queryParameters['keyword'] ?? '').trim();
     final filter = (request.url.queryParameters['filter'] ?? '全部').trim();
+    final sort = (request.url.queryParameters['sort'] ?? 'latest').trim();
     final role = (request.url.queryParameters['role'] ?? '').trim();
     final currentUser = _currentUserId(request);
 
@@ -637,7 +665,35 @@ class _BackendApp {
 
           return hitKeyword && hitFilter && hitRole;
         })
-        .toList(growable: false);
+        .toList(growable: true);
+
+    switch (sort) {
+      case 'price_asc':
+        filtered.sort(
+          (a, b) => _toInt(a['unit_price']).compareTo(_toInt(b['unit_price'])),
+        );
+        break;
+      case 'price_desc':
+        filtered.sort(
+          (a, b) => _toInt(b['unit_price']).compareTo(_toInt(a['unit_price'])),
+        );
+        break;
+      case 'seats_desc':
+        filtered.sort(
+          (a, b) => _toInt(b['seats_left']).compareTo(_toInt(a['seats_left'])),
+        );
+        break;
+      case 'latest':
+      default:
+        filtered.sort((a, b) {
+          final aId = (a['room_id'] ?? '').toString().replaceFirst('R-', '');
+          final bId = (b['room_id'] ?? '').toString().replaceFirst('R-', '');
+          final aNum = int.tryParse(aId) ?? 0;
+          final bNum = int.tryParse(bId) ?? 0;
+          return bNum.compareTo(aNum);
+        });
+        break;
+    }
 
     return _ok({'items': filtered});
   }
@@ -794,14 +850,15 @@ class _BackendApp {
       }
     }
 
-    final items = _roomInvitations
-        .where((item) => (item['room_id'] ?? '').toString() == roomId)
-        .toList(growable: false)
-      ..sort((a, b) {
-        final aTime = (a['created_at'] ?? '').toString();
-        final bTime = (b['created_at'] ?? '').toString();
-        return bTime.compareTo(aTime);
-      });
+    final items =
+        _roomInvitations
+            .where((item) => (item['room_id'] ?? '').toString() == roomId)
+            .toList(growable: false)
+          ..sort((a, b) {
+            final aTime = (a['created_at'] ?? '').toString();
+            final bTime = (b['created_at'] ?? '').toString();
+            return bTime.compareTo(aTime);
+          });
 
     return _ok({'items': items});
   }
@@ -814,19 +871,22 @@ class _BackendApp {
 
     _expirePendingInvitations();
 
+    _markOrphanPendingInvitationsFailed();
+
     final currentUserId = _currentUserId(request);
-    final items = _roomInvitations
-        .where(
-          (item) =>
-              (item['invitee_user_id'] ?? '').toString() == currentUserId &&
-              (item['status'] ?? '').toString() == 'pending',
-        )
-        .toList(growable: false)
-      ..sort((a, b) {
-        final aTime = (a['created_at'] ?? '').toString();
-        final bTime = (b['created_at'] ?? '').toString();
-        return bTime.compareTo(aTime);
-      });
+    final items =
+        _roomInvitations
+            .where(
+              (item) =>
+                  (item['invitee_user_id'] ?? '').toString() == currentUserId &&
+                  (item['status'] ?? '').toString() == 'pending',
+            )
+            .toList(growable: false)
+          ..sort((a, b) {
+            final aTime = (a['created_at'] ?? '').toString();
+            final bTime = (b['created_at'] ?? '').toString();
+            return bTime.compareTo(aTime);
+          });
 
     return _ok({'items': items});
   }
@@ -853,10 +913,18 @@ class _BackendApp {
       return _error('仅找陪玩身份可邀请陪玩', statusCode: 403);
     }
 
+    final roomStatus = (room['status'] ?? '').toString();
+    if (roomStatus == '已完成' || roomStatus == '已解散') {
+      return _error('当前房间状态不允许邀请陪玩', statusCode: 409);
+    }
+
     final body = await _readJsonBody(request);
     final companionId = (body['companion_id'] ?? '').toString();
     if (companionId.isEmpty) {
       return _error('companion_id 参数无效', statusCode: 400);
+    }
+    if (companionId == currentUserId) {
+      return _error('不能邀请自己', statusCode: 400);
     }
 
     if (!_onlineUserIds().contains(companionId)) {
@@ -1121,8 +1189,9 @@ class _BackendApp {
       return _error('room not found', statusCode: 404);
     }
 
-    if ((room['status'] ?? '').toString() == '已完成') {
-      return _error('房间已完成，无法加入', statusCode: 409);
+    final roomStatus = (room['status'] ?? '').toString();
+    if (roomStatus == '已完成' || roomStatus == '已解散') {
+      return _error('当前房间状态无法加入', statusCode: 409);
     }
 
     final body = await _readJsonBody(request);
@@ -1195,6 +1264,17 @@ class _BackendApp {
       return _error('仅找陪玩身份可解散房间', statusCode: 403);
     }
 
+    if ((room['status'] ?? '').toString() == '已完成') {
+      return _error('已完成房间不可解散', statusCode: 409);
+    }
+
+    _resolvePendingInvitationsForRoom(
+      roomId,
+      status: 'cancelled',
+      reason: 'room_dissolved',
+      removePendingMember: false,
+    );
+
     final members = _roomMembers(room);
     for (final member in members) {
       member['status'] = '已解散';
@@ -1230,6 +1310,21 @@ class _BackendApp {
     if ((room['creator_user_id'] ?? '').toString() != currentUserId) {
       return _error('仅房主可确认完成', statusCode: 403);
     }
+
+    final roomStatus = (room['status'] ?? '').toString();
+    if (roomStatus == '已完成') {
+      return _error('房间已完成，无需重复确认', statusCode: 409);
+    }
+    if (roomStatus == '已解散') {
+      return _error('已解散房间不可确认完成', statusCode: 409);
+    }
+
+    _resolvePendingInvitationsForRoom(
+      roomId,
+      status: 'failed',
+      reason: 'room_completed',
+      removePendingMember: true,
+    );
 
     room['status'] = '已完成';
 
@@ -1467,12 +1562,28 @@ class _BackendApp {
     }
 
     final body = await _readJsonBody(request);
-    if ((body['room_id'] ?? '').toString().isEmpty ||
-        (body['reason'] ?? '').toString().isEmpty) {
+    final roomId = (body['room_id'] ?? '').toString().trim();
+    final reason = (body['reason'] ?? '').toString().trim();
+    if (roomId.isEmpty || reason.isEmpty) {
       return _error('room_id/reason 参数无效', statusCode: 400);
     }
 
-    return _ok({'accepted': true});
+    final currentUserId = _currentUserId(request);
+    final report = _createReportRecord(
+      reporterId: currentUserId,
+      targetType: 'room',
+      targetId: roomId,
+      reason: reason,
+      description: (body['description'] ?? '').toString().trim(),
+      evidenceUrls: (body['evidence_urls'] is List)
+          ? (body['evidence_urls'] as List)
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .toList()
+          : const <String>[],
+    );
+
+    return _ok({'accepted': true, 'report': report});
   }
 
   Future<Response> _reportOrder(Request request) async {
@@ -1482,12 +1593,186 @@ class _BackendApp {
     }
 
     final body = await _readJsonBody(request);
-    if ((body['order_id'] ?? '').toString().isEmpty ||
-        (body['reason'] ?? '').toString().isEmpty) {
+    final orderId = (body['order_id'] ?? '').toString().trim();
+    final reason = (body['reason'] ?? '').toString().trim();
+    if (orderId.isEmpty || reason.isEmpty) {
       return _error('order_id/reason 参数无效', statusCode: 400);
     }
 
-    return _ok({'accepted': true});
+    final currentUserId = _currentUserId(request);
+    final report = _createReportRecord(
+      reporterId: currentUserId,
+      targetType: 'order',
+      targetId: orderId,
+      reason: reason,
+      description: (body['description'] ?? '').toString().trim(),
+      evidenceUrls: (body['evidence_urls'] is List)
+          ? (body['evidence_urls'] as List)
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .toList()
+          : const <String>[],
+    );
+
+    return _ok({'accepted': true, 'report': report});
+  }
+
+  Future<Response> _submitReport(Request request) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final body = await _readJsonBody(request);
+    final targetType = (body['target_type'] ?? '').toString().trim();
+    final targetId = (body['target_id'] ?? '').toString().trim();
+    final reason = (body['reason'] ?? '').toString().trim();
+    final description = (body['description'] ?? '').toString().trim();
+
+    if (targetType.isEmpty || targetId.isEmpty || reason.isEmpty) {
+      return _error('target_type/target_id/reason 参数无效', statusCode: 400);
+    }
+
+    final currentUserId = _currentUserId(request);
+    final report = _createReportRecord(
+      reporterId: currentUserId,
+      targetType: targetType,
+      targetId: targetId,
+      reason: reason,
+      description: description,
+      evidenceUrls: (body['evidence_urls'] is List)
+          ? (body['evidence_urls'] as List)
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .toList()
+          : const <String>[],
+    );
+
+    return _ok(report, statusCode: 201);
+  }
+
+  Future<Response> _getMyReports(Request request) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final currentUserId = _currentUserId(request);
+    final items =
+        _reports
+            .where(
+              (item) => (item['reporter_id'] ?? '').toString() == currentUserId,
+            )
+            .toList()
+          ..sort(
+            (a, b) => (b['created_at'] ?? '').toString().compareTo(
+              (a['created_at'] ?? '').toString(),
+            ),
+          );
+
+    return _ok({'items': items});
+  }
+
+  Future<Response> _getAllReports(Request request) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final currentUserId = _currentUserId(request);
+    final account = _accountStore.findByUserId(currentUserId);
+    if (account == null) {
+      return _error('account not found', statusCode: 404);
+    }
+    if (account.role != 'boss') {
+      return _error('仅审核员可查看全部举报', statusCode: 403);
+    }
+
+    final items = List<Map<String, dynamic>>.from(_reports)
+      ..sort(
+        (a, b) => (b['created_at'] ?? '').toString().compareTo(
+          (a['created_at'] ?? '').toString(),
+        ),
+      );
+
+    return _ok({'items': items});
+  }
+
+  Future<Response> _reviewReport(Request request, String reportId) async {
+    final authError = _requireAuth(request);
+    if (authError != null) {
+      return authError;
+    }
+
+    final currentUserId = _currentUserId(request);
+    final account = _accountStore.findByUserId(currentUserId);
+    if (account == null) {
+      return _error('account not found', statusCode: 404);
+    }
+    if (account.role != 'boss') {
+      return _error('仅审核员可处理举报', statusCode: 403);
+    }
+
+    final body = await _readJsonBody(request);
+    final status = (body['status'] ?? '').toString().trim();
+    final adminNotes = (body['admin_notes'] ?? '').toString().trim();
+    if (status != 'under_review' &&
+        status != 'approved' &&
+        status != 'rejected') {
+      return _error('status 参数无效', statusCode: 400);
+    }
+
+    final index = _reports.indexWhere(
+      (item) => (item['report_id'] ?? '').toString() == reportId,
+    );
+    if (index < 0) {
+      return _error('report not found', statusCode: 404);
+    }
+
+    final report = _reports[index];
+    final currentStatus = (report['status'] ?? '').toString();
+    if ((currentStatus == 'approved' || currentStatus == 'rejected') &&
+        status == 'under_review') {
+      return _error('已结案举报不可回退到审核中', statusCode: 409);
+    }
+
+    report['status'] = status;
+    if (adminNotes.isNotEmpty) {
+      report['admin_notes'] = adminNotes;
+    }
+    report['reviewed_by'] = currentUserId;
+    report['reviewed_at'] = DateTime.now().toIso8601String();
+    report['resolved_at'] = (status == 'approved' || status == 'rejected')
+        ? DateTime.now().toIso8601String()
+        : null;
+
+    return _ok(report);
+  }
+
+  Map<String, dynamic> _createReportRecord({
+    required String reporterId,
+    required String targetType,
+    required String targetId,
+    required String reason,
+    required String description,
+    required List<String> evidenceUrls,
+  }) {
+    final now = DateTime.now();
+    final report = <String, dynamic>{
+      'report_id': 'rp_${now.millisecondsSinceEpoch}_${_reportSeq++}',
+      'reporter_id': reporterId,
+      'target_type': targetType,
+      'target_id': targetId,
+      'reason': reason,
+      'description': description.isEmpty ? null : description,
+      'evidence_urls': evidenceUrls,
+      'status': 'pending',
+      'admin_notes': null,
+      'created_at': now.toIso8601String(),
+      'resolved_at': null,
+    };
+    _reports.add(report);
+    return report;
   }
 
   Future<Map<String, dynamic>> _readJsonBody(Request request) async {
@@ -1589,7 +1874,8 @@ class _BackendApp {
       if ((invitation['status'] ?? '').toString() != 'pending') {
         continue;
       }
-      if (roomId != null && (invitation['room_id'] ?? '').toString() != roomId) {
+      if (roomId != null &&
+          (invitation['room_id'] ?? '').toString() != roomId) {
         continue;
       }
 
@@ -1649,6 +1935,56 @@ class _BackendApp {
           (member['status'] ?? '').toString() == '待确认接单',
     );
     room['members'] = members;
+  }
+
+  void _resolvePendingInvitationsForRoom(
+    String roomId, {
+    required String status,
+    required String reason,
+    required bool removePendingMember,
+  }) {
+    final now = DateTime.now().toIso8601String();
+    for (final invitation in _roomInvitations) {
+      if ((invitation['room_id'] ?? '').toString() != roomId) {
+        continue;
+      }
+      if ((invitation['status'] ?? '').toString() != 'pending') {
+        continue;
+      }
+      invitation['status'] = status;
+      invitation['decided_at'] = now;
+      invitation['reject_reason'] = reason;
+    }
+
+    if (!removePendingMember) {
+      return;
+    }
+
+    final room = _findRoomById(roomId);
+    if (room == null) {
+      return;
+    }
+    final members = _roomMembers(room);
+    members.removeWhere(
+      (member) => (member['status'] ?? '').toString() == '待确认接单',
+    );
+    room['members'] = members;
+  }
+
+  void _markOrphanPendingInvitationsFailed() {
+    final now = DateTime.now().toIso8601String();
+    for (final invitation in _roomInvitations) {
+      if ((invitation['status'] ?? '').toString() != 'pending') {
+        continue;
+      }
+      final roomId = (invitation['room_id'] ?? '').toString();
+      if (_findRoomById(roomId) != null) {
+        continue;
+      }
+      invitation['status'] = 'failed';
+      invitation['decided_at'] = now;
+      invitation['reject_reason'] = 'room_not_found';
+    }
   }
 
   String? _extractToken(Request request) {
@@ -1741,6 +2077,7 @@ class _StoredAccount {
     required this.smsCode,
     required this.userId,
     required this.displayName,
+    required this.avatar,
     required this.role,
     required this.createdAt,
     required this.updatedAt,
@@ -1760,6 +2097,7 @@ class _StoredAccount {
   String smsCode;
   final String userId;
   String displayName;
+  String avatar;
   String role;
   final DateTime createdAt;
   DateTime updatedAt;
@@ -1780,20 +2118,22 @@ class _StoredAccount {
       smsCode: (json['sms_code'] ?? '').toString(),
       userId: (json['user_id'] ?? '').toString(),
       displayName: (json['display_name'] ?? '当前用户').toString(),
+      avatar: (json['avatar'] ?? '🎮').toString(),
       role: (json['role'] ?? 'boss').toString(),
       createdAt: _parseDateTime(json['created_at']) ?? DateTime.now(),
       updatedAt: _parseDateTime(json['updated_at']) ?? DateTime.now(),
       lastLoginAt: _parseDateTime(json['last_login_at']),
-      verificationStatus:
-          (json['verification_status'] ?? 'notStarted').toString(),
+      verificationStatus: (json['verification_status'] ?? 'notStarted')
+          .toString(),
       verificationRealName: json['verification_real_name']?.toString(),
       verificationIdCardNumber: json['verification_id_card_number']?.toString(),
       verificationIdFrontUrl: json['verification_id_front_url']?.toString(),
       verificationIdBackUrl: json['verification_id_back_url']?.toString(),
       verificationWithHandUrl: json['verification_with_hand_url']?.toString(),
       verificationRejectReason: json['verification_reject_reason']?.toString(),
-      verificationSubmittedAt:
-          _parseDateTime(json['verification_submitted_at']),
+      verificationSubmittedAt: _parseDateTime(
+        json['verification_submitted_at'],
+      ),
       verificationVerifiedAt: _parseDateTime(json['verification_verified_at']),
     );
   }
@@ -1804,6 +2144,7 @@ class _StoredAccount {
       'sms_code': smsCode,
       'user_id': userId,
       'display_name': displayName,
+      'avatar': avatar,
       'role': role,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
@@ -1862,6 +2203,7 @@ class _AccountStore {
         smsCode: '123456',
         userId: 'u_13800000000',
         displayName: '风暴小刘',
+        avatar: _randomAvatar(),
         role: 'boss',
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
@@ -1901,6 +2243,7 @@ class _AccountStore {
       displayName: (displayName ?? '').trim().isEmpty
           ? '玩家$suffix'
           : displayName!.trim(),
+      avatar: _randomAvatar(),
       role: role,
       createdAt: now,
       updatedAt: now,
@@ -1915,6 +2258,7 @@ class _AccountStore {
     required String displayName,
     required String phone,
     String? password,
+    String? avatar,
   }) async {
     final account = findByUserId(userId);
     if (account == null) {
@@ -1936,6 +2280,9 @@ class _AccountStore {
     account.displayName = displayName.trim().isEmpty
         ? account.displayName
         : displayName.trim();
+    if (avatar != null && avatar.trim().isNotEmpty) {
+      account.avatar = avatar.trim();
+    }
     if (password != null && password.trim().isNotEmpty) {
       account.smsCode = password.trim();
     }
@@ -1962,6 +2309,26 @@ class _AccountStore {
     await file.writeAsString(
       const JsonEncoder.withIndent('  ').convert(payload),
     );
+  }
+
+  static const List<String> _avatarPool = [
+    '🎮',
+    '🦊',
+    '🐼',
+    '🐯',
+    '🐻',
+    '🦁',
+    '🐧',
+    '🐵',
+    '🐨',
+    '🐸',
+    '🦄',
+    '🐙',
+  ];
+
+  static String _randomAvatar() {
+    final random = Random();
+    return _avatarPool[random.nextInt(_avatarPool.length)];
   }
 }
 
@@ -2197,15 +2564,31 @@ class _RoomChatStore {
     }
   }
 
-  List<_ChatMessage> listByRoom(String roomId, {int limit = 50}) {
+  List<_ChatMessage> listByRoom(
+    String roomId, {
+    int limit = 50,
+    int offset = 0,
+  }) {
     final messages = _messagesByRoom[roomId] ?? const <_ChatMessage>[];
     if (messages.isEmpty) {
       return const <_ChatMessage>[];
     }
 
     final safeLimit = limit <= 0 ? 50 : limit;
-    final start = (messages.length - safeLimit).clamp(0, messages.length);
-    return messages.sublist(start);
+    final safeOffset = offset < 0 ? 0 : offset;
+    final endExclusive = (messages.length - safeOffset).clamp(
+      0,
+      messages.length,
+    );
+    if (endExclusive <= 0) {
+      return const <_ChatMessage>[];
+    }
+    final start = (endExclusive - safeLimit).clamp(0, endExclusive);
+    return messages.sublist(start, endExclusive);
+  }
+
+  int countByRoom(String roomId) {
+    return _messagesByRoom[roomId]?.length ?? 0;
   }
 
   Future<void> addMessage(String roomId, _ChatMessage message) async {
@@ -2294,8 +2677,16 @@ class _RoomChatManager {
   }
 
   /// 获取房间消息历史
-  List<_ChatMessage> getMessageHistory(String roomId, {int limit = 50}) {
-    return _store.listByRoom(roomId, limit: limit);
+  List<_ChatMessage> getMessageHistory(
+    String roomId, {
+    int limit = 50,
+    int offset = 0,
+  }) {
+    return _store.listByRoom(roomId, limit: limit, offset: offset);
+  }
+
+  int getMessageTotal(String roomId) {
+    return _store.countByRoom(roomId);
   }
 
   /// 获取房间在线用户数

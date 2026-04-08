@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../models/app_models.dart';
@@ -190,31 +191,6 @@ class _AuthGatePageState extends State<AuthGatePage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  SegmentedButton<_AuthMode>(
-                                    segments: const [
-                                      ButtonSegment<_AuthMode>(
-                                        value: _AuthMode.login,
-                                        label: Text('登录'),
-                                        icon: Icon(Icons.lock_open_rounded),
-                                      ),
-                                      ButtonSegment<_AuthMode>(
-                                        value: _AuthMode.register,
-                                        label: Text('注册'),
-                                        icon: Icon(
-                                          Icons.person_add_alt_rounded,
-                                        ),
-                                      ),
-                                    ],
-                                    selected: <_AuthMode>{mode},
-                                    showSelectedIcon: false,
-                                    onSelectionChanged: (selection) {
-                                      setState(() {
-                                        mode = selection.first;
-                                        error = null;
-                                      });
-                                    },
-                                  ),
-                                  const SizedBox(height: 18),
                                   if (mode == _AuthMode.register) ...[
                                     const Text(
                                       '请选择身份',
@@ -262,7 +238,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
                                     TextField(
                                       controller: registerDisplayNameController,
                                       decoration: const InputDecoration(
-                                        hintText: '请输入用户名称（展示用）',
+                                        hintText: '请输入用户名称',
                                         prefixIcon: Icon(Icons.badge_rounded),
                                       ),
                                     ),
@@ -340,26 +316,94 @@ class _AuthGatePageState extends State<AuthGatePage> {
                                       ),
                                     ),
                                   ),
+                                  if (mode == _AuthMode.login) ...[
+                                    const SizedBox(height: 16),
+                                    Center(
+                                      child: GestureDetector(
+                                        onTap: submitting
+                                            ? null
+                                            : () => setState(() {
+                                                mode = _AuthMode.register;
+                                                error = null;
+                                              }),
+                                        child: RichText(
+                                          text: TextSpan(
+                                            children: [
+                                              const TextSpan(
+                                                text: '没有账号？',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Color(0xFF6B7280),
+                                                ),
+                                              ),
+                                              TextSpan(
+                                                text: '立即注册',
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF0071E3),
+                                                ),
+                                                recognizer:
+                                                    TapGestureRecognizer()
+                                                      ..onTap = submitting
+                                                          ? null
+                                                          : () => setState(() {
+                                                              mode = _AuthMode
+                                                                  .register;
+                                                              error = null;
+                                                            }),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  if (mode == _AuthMode.register) ...[
+                                    const SizedBox(height: 16),
+                                    Center(
+                                      child: GestureDetector(
+                                        onTap: submitting
+                                            ? null
+                                            : () => setState(() {
+                                                mode = _AuthMode.login;
+                                                error = null;
+                                              }),
+                                        child: RichText(
+                                          text: TextSpan(
+                                            children: [
+                                              const TextSpan(
+                                                text: '已有账号？',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Color(0xFF6B7280),
+                                                ),
+                                              ),
+                                              TextSpan(
+                                                text: '返回登录',
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF0071E3),
+                                                ),
+                                                recognizer:
+                                                    TapGestureRecognizer()
+                                                      ..onTap = submitting
+                                                          ? null
+                                                          : () => setState(() {
+                                                              mode = _AuthMode
+                                                                  .login;
+                                                              error = null;
+                                                            }),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: const [
-                              _InfoPill(label: 'Apple-like 布局'),
-                              _InfoPill(label: '低噪声视觉层级'),
-                              _InfoPill(label: '适配桌面和移动端'),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          const Text(
-                            '示例账号：13800000000 / 123456',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF6B7280),
                             ),
                           ),
                         ],
@@ -401,32 +445,6 @@ class _BrandMark extends StatelessWidget {
           fontWeight: FontWeight.w700,
           color: Color(0xFF0071E3),
           letterSpacing: 0.2,
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoPill extends StatelessWidget {
-  const _InfoPill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF3A3A3C),
         ),
       ),
     );

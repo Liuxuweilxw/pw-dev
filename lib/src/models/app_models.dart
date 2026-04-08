@@ -32,22 +32,31 @@ class UserProfile {
     required this.userId,
     required this.displayName,
     required this.phone,
+    this.avatar = '🎮',
   });
 
   final String userId;
   final String displayName;
   final String phone;
+  final String avatar;
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
+    final avatar = _stringOrEmpty(json, 'avatar');
     return UserProfile(
       userId: _requiredString(json, 'user_id'),
       displayName: _requiredString(json, 'display_name'),
       phone: _requiredString(json, 'phone'),
+      avatar: avatar.isEmpty ? '🎮' : avatar,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'user_id': userId, 'display_name': displayName, 'phone': phone};
+    return {
+      'user_id': userId,
+      'display_name': displayName,
+      'phone': phone,
+      'avatar': avatar,
+    };
   }
 }
 
@@ -228,7 +237,8 @@ class InvitationItem {
       inviteeUserId: _requiredString(json, 'invitee_user_id'),
       inviteeUserName: (json['invitee_user_name'] ?? '').toString(),
       status: _requiredString(json, 'status'),
-      createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()) ??
+      createdAt:
+          DateTime.tryParse((json['created_at'] ?? '').toString()) ??
           DateTime.fromMillisecondsSinceEpoch(0),
       expiresAt: DateTime.tryParse((json['expires_at'] ?? '').toString()),
       decidedAt: DateTime.tryParse((json['decided_at'] ?? '').toString()),

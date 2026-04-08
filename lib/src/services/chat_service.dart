@@ -258,13 +258,18 @@ class ChatService {
   }
 
   /// 加载历史消息
-  Future<List<ChatMessage>> loadHistory({int limit = 50}) async {
+  Future<List<ChatMessage>> loadHistory({
+    int limit = 50,
+    int offset = 0,
+  }) async {
     if (_roomId == null || _httpBase == null) {
       return [];
     }
 
     try {
-      final uri = Uri.parse('$_httpBase/rooms/$_roomId/messages?limit=$limit');
+      final uri = Uri.parse(
+        '$_httpBase/rooms/$_roomId/messages?limit=$limit&offset=$offset',
+      );
       final response = await http
           .get(uri, headers: {'Authorization': 'Bearer $_token'})
           .timeout(const Duration(seconds: 10));
@@ -276,6 +281,15 @@ class ChatService {
           jsonList = decoded;
         } else if (decoded is Map<String, dynamic> && decoded['data'] is List) {
           jsonList = decoded['data'] as List<dynamic>;
+        } else if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          final data = decoded['data'] as Map<String, dynamic>;
+          final items = data['items'];
+          if (items is List<dynamic>) {
+            jsonList = items;
+          } else {
+            return [];
+          }
         } else {
           return [];
         }

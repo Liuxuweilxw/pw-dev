@@ -27,6 +27,7 @@ abstract class PlatformApi {
     required String displayName,
     required String phone,
     String? password,
+    String? avatar,
   });
 
   Future<void> logout();
@@ -35,6 +36,7 @@ abstract class PlatformApi {
     required UserRole role,
     String keyword,
     String filter,
+    String sort,
   });
 
   Future<List<RoomItem>> fetchJoinedRooms();
@@ -134,6 +136,16 @@ abstract class PlatformApi {
 
   /// 获取我的举报列表
   Future<List<Report>> fetchMyReports();
+
+  /// 获取全部举报（审核台）
+  Future<List<Report>> fetchAllReports();
+
+  /// 审核举报
+  Future<Report> reviewReport({
+    required String reportId,
+    required String status,
+    String? adminNotes,
+  });
 }
 
 class MockPlatformApi implements PlatformApi {
@@ -142,8 +154,10 @@ class MockPlatformApi implements PlatformApi {
   UserRole _mockRole = UserRole.boss;
   final Map<String, UserRole> _phoneRoles = {};
   final Map<String, String> _phoneDisplayNames = {};
+  final Map<String, String> _phoneAvatars = {};
   String _mockPhone = '13800000000';
   String _mockDisplayName = '风暴小刘';
+  String _mockAvatar = '🎮';
   final List<RoomItem> _rooms = List<RoomItem>.from(mockRooms);
   final List<OrderItem> _orders = List<OrderItem>.from(mockOrders);
   final List<WalletFlowItem> _walletFlows = List<WalletFlowItem>.from(
@@ -205,6 +219,25 @@ class MockPlatformApi implements PlatformApi {
   int _roomSeq = 13017;
   int _orderSeq = 20260401002;
 
+  static const List<String> _avatarPool = [
+    '🎮',
+    '🦊',
+    '🐼',
+    '🐯',
+    '🐻',
+    '🦁',
+    '🐧',
+    '🐵',
+  ];
+
+  String _randomAvatarByPhone(String phone) {
+    if (phone.isEmpty) {
+      return _avatarPool.first;
+    }
+    final hash = phone.codeUnits.fold<int>(0, (sum, item) => sum + item);
+    return _avatarPool[hash % _avatarPool.length];
+  }
+
   @override
   Future<AuthSession> loginWithSms({
     required String phone,
@@ -217,6 +250,8 @@ class MockPlatformApi implements PlatformApi {
         ? phone.substring(phone.length - 4)
         : phone;
     _mockDisplayName = _phoneDisplayNames[phone] ?? '玩家$suffix';
+    _mockAvatar = _phoneAvatars[phone] ?? _randomAvatarByPhone(phone);
+    _phoneAvatars[phone] = _mockAvatar;
     _mockRole = _phoneRoles[phone] ?? UserRole.boss;
     return AuthSession(
       accessToken: _token,
@@ -242,6 +277,7 @@ class MockPlatformApi implements PlatformApi {
     _phoneDisplayNames[phone] = resolvedDisplayName.isEmpty
         ? '玩家$suffix'
         : resolvedDisplayName;
+    _phoneAvatars[phone] = _randomAvatarByPhone(phone);
     _mockRole = role;
     return loginWithSms(phone: phone, smsCode: smsCode);
   }
@@ -278,6 +314,7 @@ class MockPlatformApi implements PlatformApi {
       userId: _mockUserId,
       displayName: _mockDisplayName,
       phone: _mockPhone,
+      avatar: _mockAvatar,
     );
   }
 
@@ -286,6 +323,7 @@ class MockPlatformApi implements PlatformApi {
     required String displayName,
     required String phone,
     String? password,
+    String? avatar,
   }) async {
     final normalizedPhone = phone.trim();
     if (normalizedPhone.isEmpty) {
@@ -297,12 +335,20 @@ class MockPlatformApi implements PlatformApi {
     _mockDisplayName = displayName.trim().isEmpty
         ? _mockDisplayName
         : displayName.trim();
+    if (avatar != null && avatar.trim().isNotEmpty) {
+      _mockAvatar = avatar.trim();
+    }
     _phoneDisplayNames[_mockPhone] = _mockDisplayName;
+    _phoneAvatars[_mockPhone] = _mockAvatar;
 
     if (oldPhone != _mockPhone) {
       final role = _phoneRoles.remove(oldPhone);
       if (role != null) {
         _phoneRoles[_mockPhone] = role;
+      }
+      final oldAvatar = _phoneAvatars.remove(oldPhone);
+      if (oldAvatar != null) {
+        _phoneAvatars[_mockPhone] = oldAvatar;
       }
     }
 
@@ -315,6 +361,7 @@ class MockPlatformApi implements PlatformApi {
       userId: _mockUserId,
       displayName: _mockDisplayName,
       phone: _mockPhone,
+      avatar: _mockAvatar,
     );
   }
 
@@ -396,7 +443,9 @@ class MockPlatformApi implements PlatformApi {
     final members = List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
 
     for (final item in current) {
-      if (item.isPending && item.expiresAt != null && now.isAfter(item.expiresAt!)) {
+      if (item.isPending &&
+          item.expiresAt != null &&
+          now.isAfter(item.expiresAt!)) {
         changed = true;
         members.removeWhere(
           (member) =>
@@ -452,6 +501,7 @@ class MockPlatformApi implements PlatformApi {
     required UserRole role,
     String keyword = '',
     String filter = '全部',
+    String sort = 'latest',
   }) async {
     if (role == UserRole.companion) {
       for (final roomId in _roomInvitations.keys) {
@@ -459,44 +509,70 @@ class MockPlatformApi implements PlatformApi {
       }
     }
 
-    return _rooms.where((room) {
-      final hitKeyword =
-          keyword.isEmpty ||
-          room.title.contains(keyword) ||
-          room.owner.contains(keyword) ||
-          room.tags.join(' ').contains(keyword);
-      final hitFilter =
-          filter == '全部' || room.status == filter || room.tags.contains(filter);
+    final result = _rooms
+        .where((room) {
+          final hitKeyword =
+              keyword.isEmpty ||
+              room.title.contains(keyword) ||
+              room.owner.contains(keyword) ||
+              room.tags.join(' ').contains(keyword);
+          final hitFilter =
+              filter == '全部' ||
+              room.status == filter ||
+              room.tags.contains(filter);
 
-      var hitRole = true;
-      if (role == UserRole.companion) {
-        final members = _roomMembers[room.id] ?? const <RoomMemberItem>[];
-        hitRole = members.any(
-          (member) =>
-              member.userId == _mockUserId &&
-              (member.status == '房主' ||
-                  member.status == '待确认接单' ||
-                  member.status == '已加入' ||
-                  member.status == '已接单'),
-        );
-      } else if (role == UserRole.boss) {
-        final members = _roomMembers[room.id] ?? const <RoomMemberItem>[];
-        final owner = members.firstWhere(
-          (member) => member.status == '房主',
-          orElse: () => const RoomMemberItem(
-            userId: '',
-            userName: '',
-            role: '',
-            status: '',
-          ),
-        );
-        if (owner.userId.isNotEmpty && owner.role == UserRole.boss.name) {
-          hitRole = owner.userId == _mockUserId;
-        }
-      }
+          var hitRole = true;
+          if (role == UserRole.companion) {
+            final members = _roomMembers[room.id] ?? const <RoomMemberItem>[];
+            hitRole = members.any(
+              (member) =>
+                  member.userId == _mockUserId &&
+                  (member.status == '房主' ||
+                      member.status == '待确认接单' ||
+                      member.status == '已加入' ||
+                      member.status == '已接单'),
+            );
+          } else if (role == UserRole.boss) {
+            final members = _roomMembers[room.id] ?? const <RoomMemberItem>[];
+            final owner = members.firstWhere(
+              (member) => member.status == '房主',
+              orElse: () => const RoomMemberItem(
+                userId: '',
+                userName: '',
+                role: '',
+                status: '',
+              ),
+            );
+            if (owner.userId.isNotEmpty && owner.role == UserRole.boss.name) {
+              hitRole = owner.userId == _mockUserId;
+            }
+          }
 
-      return hitKeyword && hitFilter && hitRole;
-    }).toList();
+          return hitKeyword && hitFilter && hitRole;
+        })
+        .toList(growable: true);
+
+    switch (sort) {
+      case 'price_asc':
+        result.sort((a, b) => a.price.compareTo(b.price));
+        break;
+      case 'price_desc':
+        result.sort((a, b) => b.price.compareTo(a.price));
+        break;
+      case 'seats_desc':
+        result.sort((a, b) => b.seatsLeft.compareTo(a.seatsLeft));
+        break;
+      case 'latest':
+      default:
+        result.sort((a, b) {
+          final aId = int.tryParse(a.id.replaceFirst('R-', '')) ?? 0;
+          final bId = int.tryParse(b.id.replaceFirst('R-', '')) ?? 0;
+          return bId.compareTo(aId);
+        });
+        break;
+    }
+
+    return result;
   }
 
   @override
@@ -832,8 +908,7 @@ class MockPlatformApi implements PlatformApi {
 
     final members = List<RoomMemberItem>.from(_roomMembers[roomId] ?? const []);
     members.removeWhere(
-      (member) =>
-          member.userId == companionId && member.status == '待确认接单',
+      (member) => member.userId == companionId && member.status == '待确认接单',
     );
     _roomMembers[roomId] = members;
   }
@@ -1109,7 +1184,54 @@ class MockPlatformApi implements PlatformApi {
 
   @override
   Future<List<Report>> fetchMyReports() async {
-    return _reports;
+    return _reports
+        .where((item) => item.reporterId == _mockUserId)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<Report>> fetchAllReports() async {
+    final list = List<Report>.from(_reports);
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
+  @override
+  Future<Report> reviewReport({
+    required String reportId,
+    required String status,
+    String? adminNotes,
+  }) async {
+    if (status != 'under_review' &&
+        status != 'approved' &&
+        status != 'rejected') {
+      throw Exception('审核状态无效');
+    }
+
+    final index = _reports.indexWhere((item) => item.reportId == reportId);
+    if (index < 0) {
+      throw Exception('举报不存在');
+    }
+
+    final current = _reports[index];
+    final next = Report(
+      reportId: current.reportId,
+      reporterId: current.reporterId,
+      targetType: current.targetType,
+      targetId: current.targetId,
+      reason: current.reason,
+      description: current.description,
+      evidenceUrls: current.evidenceUrls,
+      status: status,
+      adminNotes: adminNotes ?? current.adminNotes,
+      createdAt: current.createdAt,
+      resolvedAt: status == 'approved' || status == 'rejected'
+          ? DateTime.now()
+          : null,
+    );
+
+    _reports[index] = next;
+    return next;
   }
 
   // 工具方法

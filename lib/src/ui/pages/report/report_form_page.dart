@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../models/business_models.dart';
 import '../../../services/platform_api.dart';
 import '../../../utils/haptic_feedback.dart';
 
@@ -736,7 +737,7 @@ class _MyReportsPage extends StatefulWidget {
 
 class _MyReportsPageState extends State<_MyReportsPage> {
   bool _isLoading = true;
-  List<dynamic> _reports = [];
+  List<Report> _reports = const [];
 
   @override
   void initState() {
@@ -768,7 +769,22 @@ class _MyReportsPageState extends State<_MyReportsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('我的举报')),
+      appBar: AppBar(
+        title: const Text('我的举报'),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => _ReportReviewPage(api: widget.api),
+                ),
+              );
+            },
+            icon: const Icon(Icons.rule_rounded, size: 18),
+            label: const Text('审核台'),
+          ),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _reports.isEmpty
@@ -799,8 +815,8 @@ class _MyReportsPageState extends State<_MyReportsPage> {
     );
   }
 
-  Widget _buildReportItem(dynamic report) {
-    final status = report.status ?? 'pending';
+  Widget _buildReportItem(Report report) {
+    final status = report.status;
     final statusInfo = _getStatusInfo(status);
 
     return Container(
@@ -839,26 +855,26 @@ class _MyReportsPageState extends State<_MyReportsPage> {
               ),
               const Spacer(),
               Text(
-                report.createdAt ?? '',
+                _formatDateTime(report.createdAt),
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               ),
             ],
           ),
           const SizedBox(height: 12),
           Text(
-            '举报原因: ${report.reason ?? '未知'}',
+            '举报原因: ${report.reason}',
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
           ),
-          if (report.description != null && report.description.isNotEmpty) ...[
+          if (report.description != null && report.description!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              report.description,
+              report.description!,
               style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ],
-          if (report.result != null && report.result.isNotEmpty) ...[
+          if (report.adminNotes != null && report.adminNotes!.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -888,7 +904,7 @@ class _MyReportsPageState extends State<_MyReportsPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          report.result,
+                          report.adminNotes!,
                           style: const TextStyle(fontSize: 14),
                         ),
                       ],
@@ -907,14 +923,218 @@ class _MyReportsPageState extends State<_MyReportsPage> {
     switch (status) {
       case 'pending':
         return {'label': '待处理', 'color': Colors.orange};
-      case 'processing':
+      case 'under_review':
         return {'label': '处理中', 'color': Colors.blue};
-      case 'resolved':
+      case 'approved':
         return {'label': '已处理', 'color': Colors.green};
       case 'rejected':
         return {'label': '已驳回', 'color': Colors.red};
       default:
         return {'label': '未知', 'color': Colors.grey};
     }
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    final yyyy = dateTime.year.toString().padLeft(4, '0');
+    final mm = dateTime.month.toString().padLeft(2, '0');
+    final dd = dateTime.day.toString().padLeft(2, '0');
+    final hh = dateTime.hour.toString().padLeft(2, '0');
+    final min = dateTime.minute.toString().padLeft(2, '0');
+    return '$yyyy-$mm-$dd $hh:$min';
+  }
+}
+
+class _ReportReviewPage extends StatefulWidget {
+  const _ReportReviewPage({required this.api});
+
+  final PlatformApi api;
+
+  @override
+  State<_ReportReviewPage> createState() => _ReportReviewPageState();
+}
+
+class _ReportReviewPageState extends State<_ReportReviewPage> {
+  bool _isLoading = true;
+  bool _isSubmitting = false;
+  List<Report> _reports = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReports();
+  }
+
+  Future<void> _loadReports() async {
+    try {
+      final reports = await widget.api.fetchAllReports();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _reports = reports;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('加载审核台失败：$e')));
+    }
+  }
+
+  Future<void> _review(Report report, {required String status}) async {
+    if (_isSubmitting) {
+      return;
+    }
+
+    final notes = await _showReviewNotesDialog(status: status);
+    if (!mounted || notes == null) {
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.api.reviewReport(
+        reportId: report.reportId,
+        status: status,
+        adminNotes: notes,
+      );
+      await _loadReports();
+      if (!mounted) {
+        return;
+      }
+      final text = switch (status) {
+        'under_review' => '已标记为审核中',
+        'approved' => '已审核通过',
+        'rejected' => '已驳回举报',
+        _ => '已更新状态',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('审核失败：$e')));
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  Future<String?> _showReviewNotesDialog({required String status}) async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(
+              status == 'approved'
+                  ? '填写通过备注'
+                  : status == 'rejected'
+                  ? '填写驳回原因'
+                  : '填写审核中备注',
+            ),
+            content: TextField(
+              controller: controller,
+              maxLines: 3,
+              decoration: const InputDecoration(hintText: '选填，最多200字'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(dialogContext, controller.text.trim()),
+                child: const Text('确认'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('举报审核台')),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _reports.isEmpty
+          ? const Center(child: Text('暂无举报需要审核'))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _reports.length,
+              itemBuilder: (context, index) {
+                final report = _reports[index];
+                final isClosed =
+                    report.status == 'approved' || report.status == 'rejected';
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${report.targetType.toUpperCase()} · ${report.targetId}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 6),
+                        Text('原因：${report.reason}'),
+                        const SizedBox(height: 4),
+                        Text('状态：${report.statusText}'),
+                        if (report.adminNotes != null &&
+                            report.adminNotes!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text('备注：${report.adminNotes!}'),
+                          ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton(
+                              onPressed: (_isSubmitting || isClosed)
+                                  ? null
+                                  : () =>
+                                        _review(report, status: 'under_review'),
+                              child: const Text('标记审核中'),
+                            ),
+                            FilledButton(
+                              onPressed: (_isSubmitting || isClosed)
+                                  ? null
+                                  : () => _review(report, status: 'approved'),
+                              child: const Text('通过'),
+                            ),
+                            FilledButton.tonal(
+                              onPressed: (_isSubmitting || isClosed)
+                                  ? null
+                                  : () => _review(report, status: 'rejected'),
+                              child: const Text('驳回'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
   }
 }

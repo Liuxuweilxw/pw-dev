@@ -5,6 +5,7 @@
       "sms_code": "123456",
       "user_id": "u_13800000000",
       "display_name": "陪玩A",
+      "avatar": "🎮",
       "role": "companion",
       "created_at": "2026-04-02T00:00:00.000Z",
       "updated_at": "2026-04-04T23:39:04.700207",
@@ -16,6 +17,7 @@
       "sms_code": "654321",
       "user_id": "u_13900000000",
       "display_name": "老板C",
+      "avatar": "🎮",
       "role": "boss",
       "created_at": "2026-04-02T11:24:57.149877",
       "updated_at": "2026-04-04T23:39:15.282028",
@@ -27,10 +29,11 @@
       "sms_code": "123456",
       "user_id": "u_11111111111",
       "display_name": "hhhh",
+      "avatar": "🦁",
       "role": "boss",
       "created_at": "2026-04-02T11:34:13.194386",
-      "updated_at": "2026-04-04T00:16:23.816502",
-      "last_login_at": "2026-04-04T23:09:46.738492",
+      "updated_at": "2026-04-07T15:02:10.947640",
+      "last_login_at": "2026-04-07T15:32:28.514542",
       "verification_status": "notStarted"
     },
     {
@@ -38,6 +41,7 @@
       "sms_code": "111111111111",
       "user_id": "u_11111111112",
       "display_name": "当前用户",
+      "avatar": "🎮",
       "role": "boss",
       "created_at": "2026-04-02T15:54:56.341460",
       "updated_at": "2026-04-02T15:54:56.341460",
@@ -48,6 +52,7 @@
       "sms_code": "123456",
       "user_id": "u_11111111113",
       "display_name": "当前用户",
+      "avatar": "🎮",
       "role": "boss",
       "created_at": "2026-04-02T16:56:17.992786",
       "updated_at": "2026-04-02T16:56:17.992786",
@@ -59,10 +64,22 @@
       "sms_code": "123456",
       "user_id": "u_11111111114",
       "display_name": "当前用户",
+      "avatar": "🎮",
       "role": "companion",
       "created_at": "2026-04-02T16:56:26.747035",
       "updated_at": "2026-04-02T16:56:26.747035",
       "last_login_at": "2026-04-02T17:57:19.422845",
+      "verification_status": "notStarted"
+    },
+    {
+      "phone": "21111111111",
+      "sms_code": "123456",
+      "user_id": "u_21111111111",
+      "display_name": "test",
+      "avatar": "🦄",
+      "role": "boss",
+      "created_at": "2026-04-07T11:34:27.588975",
+      "updated_at": "2026-04-07T11:34:27.588975",
       "verification_status": "notStarted"
     }
   ]
